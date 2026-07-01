@@ -115,7 +115,7 @@ export default function SessionDetail() {
 
   return (
     <div style={s.page}>
-      <Link to="/" style={s.back}>← Back to Dashboard</Link>
+      <Link to="/dashboard" style={s.back}>← Back to Dashboard</Link>
 
       {/* Session header */}
       <div style={s.card}>

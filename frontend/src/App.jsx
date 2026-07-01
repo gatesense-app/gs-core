@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
+import Landing from './pages/Landing'
 import AdminDashboard from './pages/AdminDashboard'
 import GuardKiosk from './pages/GuardKiosk'
 import SessionDetail from './pages/SessionDetail'
@@ -11,16 +12,26 @@ const nav = {
 const logo = { fontWeight: 700, fontSize: 18, color: '#a78bfa', letterSpacing: '-0.5px' }
 const navLink = { fontSize: 14, color: '#94a3b8' }
 
+function AppNav() {
+  const { pathname } = useLocation()
+  if (pathname === '/') return null
+
+  return (
+    <nav style={nav}>
+      <Link to="/" style={logo}>GateSense</Link>
+      <Link to="/dashboard" style={navLink}>Dashboard</Link>
+      <Link to="/kiosk" style={navLink}>Guard Kiosk</Link>
+    </nav>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <nav style={nav}>
-        <Link to="/" style={logo}>GateSense</Link>
-        <Link to="/" style={navLink}>Dashboard</Link>
-        <Link to="/kiosk" style={navLink}>Guard Kiosk</Link>
-      </nav>
+      <AppNav />
       <Routes>
-        <Route path="/" element={<AdminDashboard />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/dashboard" element={<AdminDashboard />} />
         <Route path="/kiosk" element={<GuardKiosk />} />
         <Route path="/session/:id" element={<SessionDetail />} />
       </Routes>
