@@ -1,0 +1,287 @@
+"""
+Delivery Triage Agent — raw Claude API, no framework.
+
+Same loop pattern as gate_agent.py. Goal: reinforce the primitive.
+
+Decision logic:
+  - Known service + within typical hours + auto_log_daytime = True  -> auto_approved
+  - Known service + after hours + notify_after_hours = True          -> route_to_intercom_agent
+  - Unknown service                                                   -> flag_anomaly + route_to_intercom_agent
+  - Unusual delivery pattern (e.g. 3rd delivery today)               -> flag_anomaly + route_to_intercom_agent
+"""
+
+import json
+import httpx
+import anthropic
+from dotenv import load_dotenv
+
+from backend.tools.delivery_tools import execute_tool
+
+load_dotenv()
+
+_http_client = httpx.Client(verify=False)
+client = anthropic.Anthropic(http_client=_http_client)
+
+MODEL = "claude-sonnet-4-6"
+
+DELIVERY_TOOLS = [
+    {
+        "name": "classify_delivery_service",
+        "description": (
+            "Checks whether the purpose_detail matches a known delivery service "
+            "(Swiggy, Amazon, Blinkit, etc.). Returns is_known_service and the matched name."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "purpose_detail": {
+                    "type": "string",
+                    "description": "The free-text purpose detail provided by the guard or visitor",
+                },
+            },
+            "required": ["purpose_detail"],
+        },
+    },
+    {
+        "name": "get_delivery_pattern_history",
+        "description": (
+            "Returns the historical delivery pattern for this flat: average deliveries per week, "
+            "typical delivery hours, and most common services. Use this to detect anomalies."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flat_number": {"type": "string"},
+            },
+            "required": ["flat_number"],
+        },
+    },
+    {
+        "name": "get_resident_delivery_preferences",
+        "description": (
+            "Returns the resident's delivery preferences: whether to auto-log daytime deliveries "
+            "and whether to notify after hours."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flat_number": {"type": "string"},
+            },
+            "required": ["flat_number"],
+        },
+    },
+    {
+        "name": "flag_anomaly",
+        "description": (
+            "Flag an anomaly on this delivery session. Call this before routing to intercom "
+            "whenever something is unusual: unknown service, after-hours delivery when resident "
+            "said to notify, or suspicious pattern."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "anomaly_type": {
+                    "type": "string",
+                    "enum": ["unknown_service", "after_hours", "unusual_pattern", "suspicious"],
+                },
+                "details": {
+                    "type": "string",
+                    "description": "One sentence describing what triggered the anomaly flag",
+                },
+            },
+            "required": ["session_id", "anomaly_type", "details"],
+        },
+    },
+    {
+        "name": "create_visitor_log",
+        "description": (
+            "Log the session as auto_approved. Only call this for clean, routine deliveries "
+            "that match all three criteria: known service + daytime + auto_log_daytime=true."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "visitor_name": {"type": "string"},
+                "flat_number": {"type": "string"},
+                "purpose": {"type": "string"},
+                "decision": {"type": "string", "enum": ["auto_approved"]},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["session_id", "visitor_name", "flat_number", "purpose", "decision", "reasoning"],
+        },
+    },
+    {
+        "name": "route_to_intercom_agent",
+        "description": (
+            "Route this delivery session to the Intercom Agent so the resident can confirm. "
+            "Use after flag_anomaly, or whenever auto-approval criteria are not fully met."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["session_id", "reason"],
+        },
+    },
+]
+
+SYSTEM_PROMPT = """You are the Delivery Triage Agent for a residential society management system.
+
+You receive delivery visitors that were routed to you by the Gate Visitor Agent.
+Your job: decide whether to auto-approve a routine delivery or flag it for resident confirmation.
+
+Decision logic (apply in order):
+1. classify_delivery_service — is this a known service?
+2. get_delivery_pattern_history — does this fit the flat's normal delivery pattern?
+3. get_resident_delivery_preferences — has the resident opted into auto-logging?
+
+AUTO-APPROVE (call create_visitor_log with decision=auto_approved) if ALL of:
+  - is_known_service = true
+  - Current time is within the flat's typical delivery hours
+  - auto_log_daytime = true
+
+FLAG + ROUTE TO INTERCOM (call flag_anomaly then route_to_intercom_agent) if ANY of:
+  - Service is unknown
+  - Delivery is after hours AND notify_after_hours = true
+  - Pattern seems unusual (e.g. far outside typical hours, service never seen before)
+
+Always gather all three data points before deciding.
+Be concise in your final text response.
+"""
+
+
+def run_delivery_agent(
+    session_id: str,
+    visitor_name: str,
+    flat_number: str,
+    purpose_detail: str,
+) -> dict:
+    """
+    Entry point. In the real pipeline this is called by the Gate Agent's
+    route_to_delivery_agent tool (or a message queue consumer).
+
+    Args:
+        session_id:     Inherited from the Gate Agent's session
+        visitor_name:   Visitor name (e.g. "Swiggy", "Rahul from Delhivery")
+        flat_number:    Flat being delivered to
+        purpose_detail: Free-text from the guard (e.g. "Blinkit grocery delivery")
+    """
+    from datetime import datetime
+    current_time = datetime.now().strftime("%H:%M")
+
+    initial_message = (
+        f"A delivery visitor has been routed to you for triage.\n"
+        f"Session ID: {session_id}\n"
+        f"Visitor name: {visitor_name}\n"
+        f"Flat: {flat_number}\n"
+        f"Purpose detail: {purpose_detail}\n"
+        f"Current time: {current_time}\n\n"
+        f"Check the service, delivery history, and resident preferences, then decide."
+    )
+
+    messages = [{"role": "user", "content": initial_message}]
+
+    print(f"\n{'='*60}")
+    print(f"[Delivery Agent] Session: {session_id}")
+    print(f"  {visitor_name} -> Flat {flat_number} | {purpose_detail}")
+    print(f"{'='*60}")
+
+    iteration = 0
+    while True:
+        iteration += 1
+        print(f"\n[Loop iteration {iteration}] Calling Claude...")
+
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=SYSTEM_PROMPT,
+            tools=DELIVERY_TOOLS,
+            messages=messages,
+        )
+
+        print(f"  stop_reason: {response.stop_reason}")
+
+        if response.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    print(f"  -> Tool call: {block.name}({json.dumps(block.input)})")
+                    result_str = execute_tool(block.name, block.input)
+                    result_data = json.loads(result_str)
+                    print(f"     <- Result: {json.dumps(result_data)}")
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_str,
+                    })
+
+            messages.append({"role": "user", "content": tool_results})
+
+        elif response.stop_reason == "end_turn":
+            messages.append({"role": "assistant", "content": response.content})
+
+            final_text = "".join(
+                block.text for block in response.content if hasattr(block, "text")
+            )
+            print(f"\n[Delivery Agent] Final decision: {final_text}")
+
+            outcome = _infer_outcome(messages)
+            return {
+                "session_id": session_id,
+                "outcome": outcome,
+                "final_message": final_text,
+                "message_history": messages,
+            }
+
+        else:
+            raise RuntimeError(f"Unexpected stop_reason: {response.stop_reason}")
+
+
+def _infer_outcome(messages: list) -> str:
+    for msg in messages:
+        if msg["role"] == "assistant":
+            content = msg["content"] if isinstance(msg["content"], list) else []
+            for block in content:
+                if hasattr(block, "type") and block.type == "tool_use":
+                    if block.name == "create_visitor_log":
+                        return "auto_approved"
+                    if block.name == "route_to_intercom_agent":
+                        return "routed_intercom"
+    return "unknown"
+
+
+if __name__ == "__main__":
+    import uuid
+
+    print("\n--- Test 1: Known daytime delivery (Blinkit -> A-202) ---")
+    result = run_delivery_agent(
+        session_id=str(uuid.uuid4())[:8],
+        visitor_name="Blinkit Delivery",
+        flat_number="A-202",
+        purpose_detail="Blinkit grocery delivery",
+    )
+    print(f"\nOutcome: {result['outcome']}")
+
+    print("\n\n--- Test 2: Unknown courier -> should flag anomaly + route intercom ---")
+    result = run_delivery_agent(
+        session_id=str(uuid.uuid4())[:8],
+        visitor_name="Rajesh",
+        flat_number="A-202",
+        purpose_detail="Parcel from some local shop",
+    )
+    print(f"\nOutcome: {result['outcome']}")
+
+    print("\n\n--- Test 3: Known service but after hours, notify preference on ---")
+    result = run_delivery_agent(
+        session_id=str(uuid.uuid4())[:8],
+        visitor_name="Amazon Delivery",
+        flat_number="A-202",
+        purpose_detail="Amazon package delivery at 21:30",
+    )
+    print(f"\nOutcome: {result['outcome']}")
