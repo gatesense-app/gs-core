@@ -9,12 +9,20 @@ Endpoints:
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend import session_store
 from backend.pipeline import handle_visitor_entry, handle_resident_reply
 
 app = FastAPI(title="GateSense", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
