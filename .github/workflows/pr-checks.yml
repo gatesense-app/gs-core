@@ -52,6 +52,7 @@ jobs:
       - name: Run pipeline tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PYTHONUTF8: "1"
         run: python -m backend.test_pipeline
 
   # ── Vercel preview deploy ─────────────────────────────────────────────────────
