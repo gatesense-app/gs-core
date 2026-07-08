@@ -1,0 +1,36 @@
+# Local dev parity with prod (Railway): FastAPI backend + Postgres 16.
+#   docker-compose up --build
+# The backend is served at http://localhost:8000, Postgres at localhost:5432.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: gatesense
+      POSTGRES_PASSWORD: gatesense
+      POSTGRES_DB: gatesense
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gatesense -d gatesense"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://gatesense:gatesense@db:5432/gatesense
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

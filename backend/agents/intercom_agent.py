@@ -43,12 +43,12 @@ from backend.tools.intercom_tools import (
     escalate_to_backup_contact,
     log_conversation_turn,
 )
+from backend.config import MODEL
 
 load_dotenv()
 
 _http_client = httpx.Client(verify=False)
 claude = anthropic.Anthropic(http_client=_http_client)
-MODEL = "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +96,7 @@ def notify_resident(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=200,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}],
     )
     message_text = response.content[0].text
@@ -163,6 +164,7 @@ def classify_reply(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=10,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}],
     )
     intent = response.content[0].text.strip().lower()
@@ -201,6 +203,7 @@ def clarify_loop(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=150,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": relay_prompt}],
     )
     relay_message = response.content[0].text

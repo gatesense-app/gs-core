@@ -24,6 +24,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from backend.tools.gate_tools import execute_tool
+from backend.config import MODEL
 
 load_dotenv()
 
@@ -32,8 +33,6 @@ load_dotenv()
 # Replace with SSL_CERT_FILE pointing to your corporate CA cert for a proper fix.
 _http_client = httpx.Client(verify=False)
 client = anthropic.Anthropic(http_client=_http_client)
-
-MODEL = "claude-sonnet-4-6"
 
 # ---------------------------------------------------------------------------
 # Tool definitions — Claude reads these to know what it's allowed to call.
@@ -204,6 +203,7 @@ def run_gate_agent(visitor_name: str, flat_number: str, purpose: str, purpose_de
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
+            thinking={"type": "disabled"},
             system=SYSTEM_PROMPT,
             tools=GATE_TOOLS,
             messages=messages,

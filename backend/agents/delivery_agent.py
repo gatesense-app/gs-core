@@ -16,13 +16,12 @@ import anthropic
 from dotenv import load_dotenv
 
 from backend.tools.delivery_tools import execute_tool
+from backend.config import MODEL
 
 load_dotenv()
 
 _http_client = httpx.Client(verify=False)
 client = anthropic.Anthropic(http_client=_http_client)
-
-MODEL = "claude-sonnet-4-6"
 
 DELIVERY_TOOLS = [
     {
@@ -198,6 +197,7 @@ def run_delivery_agent(
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
+            thinking={"type": "disabled"},
             system=SYSTEM_PROMPT,
             tools=DELIVERY_TOOLS,
             messages=messages,
