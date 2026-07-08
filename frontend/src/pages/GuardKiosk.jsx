@@ -3,27 +3,26 @@ import { useNavigate } from 'react-router-dom'
 
 const API = 'http://localhost:8000'
 
+const field = {
+  width: '100%', padding: '10px 14px', borderRadius: 8,
+  border: '1px solid var(--c-border)', background: 'var(--c-input-bg)',
+  color: 'var(--c-text)', fontSize: 14, marginBottom: 18, outline: 'none',
+  boxSizing: 'border-box',
+}
 const s = {
   page: { maxWidth: 480, margin: '60px auto', padding: '0 20px' },
-  heading: { fontSize: 22, fontWeight: 600, color: '#f1f5f9', marginBottom: 6 },
-  sub: { fontSize: 14, color: '#64748b', marginBottom: 32 },
-  label: { display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  input: {
-    width: '100%', padding: '10px 14px', borderRadius: 8,
-    border: '1px solid #1e2130', background: '#131620',
-    color: '#e2e8f0', fontSize: 14, marginBottom: 18, outline: 'none',
-  },
-  select: {
-    width: '100%', padding: '10px 14px', borderRadius: 8,
-    border: '1px solid #1e2130', background: '#131620',
-    color: '#e2e8f0', fontSize: 14, marginBottom: 18, outline: 'none',
-  },
+  heading: { fontSize: 22, fontWeight: 700, color: 'var(--c-text)', marginBottom: 6 },
+  sub: { fontSize: 14, color: 'var(--c-muted)', marginBottom: 32 },
+  label: { display: 'block', fontSize: 13, color: 'var(--c-sub)', marginBottom: 6 },
+  input: field,
+  select: field,
   btn: {
     width: '100%', padding: '12px', borderRadius: 8,
-    background: '#7c3aed', border: 'none', color: '#fff',
-    fontSize: 15, fontWeight: 600,
+    background: 'linear-gradient(135deg, var(--c-accent), var(--c-accent-2))',
+    border: 'none', color: '#fff', fontSize: 15, fontWeight: 700,
+    boxShadow: '0 6px 16px -8px var(--c-accent)',
   },
-  error: { color: '#f87171', fontSize: 13, marginTop: 12 },
+  error: { color: 'var(--c-error)', fontSize: 13, marginTop: 12 },
 }
 
 export default function GuardKiosk() {

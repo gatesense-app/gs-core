@@ -18,16 +18,16 @@ const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' 
 const s = {
   page: { padding: '32px 28px' },
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
-  title: { fontSize: 20, fontWeight: 600, color: '#f1f5f9' },
+  title: { fontSize: 20, fontWeight: 700, color: 'var(--c-text)' },
   refresh: {
-    padding: '7px 14px', borderRadius: 7, border: '1px solid #1e2130',
-    background: 'transparent', color: '#94a3b8', fontSize: 13,
+    padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)',
+    background: 'transparent', color: 'var(--c-sub)', fontSize: 13,
   },
-  empty: { color: '#475569', textAlign: 'center', marginTop: 80, fontSize: 15 },
+  empty: { color: 'var(--c-muted)', textAlign: 'center', marginTop: 80, fontSize: 15 },
   table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', fontSize: 12, color: '#475569', padding: '0 12px 10px', borderBottom: '1px solid #1e2130' },
-  tr: { borderBottom: '1px solid #0f1117', cursor: 'pointer' },
-  td: { padding: '14px 12px', fontSize: 14 },
+  th: { textAlign: 'left', fontSize: 12, color: 'var(--c-muted)', padding: '0 12px 10px', borderBottom: '1px solid var(--c-border)' },
+  tr: { borderBottom: '1px solid var(--c-row-border)', cursor: 'pointer' },
+  td: { padding: '14px 12px', fontSize: 14, color: 'var(--c-text)' },
   badge: (status) => ({
     display: 'inline-block', padding: '2px 9px', borderRadius: 99,
     fontSize: 12, fontWeight: 500,
@@ -71,7 +71,7 @@ export default function AdminDashboard() {
 
       {loading && <div style={s.empty}>Loading...</div>}
       {!loading && sessions.length === 0 && (
-        <div style={s.empty}>No sessions yet. <Link to="/kiosk" style={{ color: '#a78bfa' }}>Submit a visitor</Link> to get started.</div>
+        <div style={s.empty}>No sessions yet. <Link to="/kiosk" style={{ color: 'var(--c-accent)' }}>Submit a visitor</Link> to get started.</div>
       )}
 
       {sessions.length > 0 && (
@@ -87,12 +87,12 @@ export default function AdminDashboard() {
             {sessions.map(sess => (
               <Link key={sess.session_id} to={`/session/${sess.session_id}`} style={{ display: 'contents' }}>
                 <tr style={s.tr}>
-                  <td style={{ ...s.td, fontFamily: 'monospace', color: '#64748b', fontSize: 12 }}>
+                  <td style={{ ...s.td, fontFamily: 'monospace', color: 'var(--c-muted)', fontSize: 12 }}>
                     {sess.session_id}
                   </td>
-                  <td style={{ ...s.td, color: '#f1f5f9', fontWeight: 500 }}>{sess.visitor_name}</td>
+                  <td style={{ ...s.td, color: 'var(--c-text)', fontWeight: 500 }}>{sess.visitor_name}</td>
                   <td style={s.td}>{sess.flat_number}</td>
-                  <td style={{ ...s.td, color: '#94a3b8' }}>{sess.purpose}</td>
+                  <td style={{ ...s.td, color: 'var(--c-sub)' }}>{sess.purpose}</td>
                   <td style={s.td}>
                     <div style={s.agents}>
                       {[...new Set(sess.decision_trace.map(t => t.agent))].map(a =>

@@ -1,10 +1,59 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ---------------------------------------------------------------------------
+   Theme tokens. Light is the default (mirrors the landing page); dark is opt-in
+   via data-theme="dark" on <html>. See src/theme.js.
+--------------------------------------------------------------------------- */
+:root {
+  --c-bg: #f8fafc;
+  --c-panel: #ffffff;
+  --c-panel-alt: #f1f5f9;
+  --c-border: #e2e8f0;
+  --c-row-border: #eef2f7;
+  --c-text: #0f172a;
+  --c-text-body: #334155;
+  --c-sub: #64748b;
+  --c-muted: #94a3b8;
+  --c-accent: #4f46e5;
+  --c-accent-2: #7c3aed;
+  --c-accent-soft: #4f46e5;
+  --c-accent-bg: rgba(79, 70, 229, 0.08);
+  --c-accent-border: rgba(79, 70, 229, 0.22);
+  --c-input-bg: #ffffff;
+  --c-nav-bg: rgba(255, 255, 255, 0.85);
+  --c-error: #dc2626;
+  --c-ok: #059669;
+  --c-card-shadow: 0 2px 10px -6px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="dark"] {
+  --c-bg: #0f1117;
+  --c-panel: #131620;
+  --c-panel-alt: #1e2130;
+  --c-border: #1e2130;
+  --c-row-border: #0f1117;
+  --c-text: #f1f5f9;
+  --c-text-body: #e2e8f0;
+  --c-sub: #94a3b8;
+  --c-muted: #64748b;
+  --c-accent: #7c3aed;
+  --c-accent-2: #a78bfa;
+  --c-accent-soft: #a78bfa;
+  --c-accent-bg: rgba(124, 58, 237, 0.16);
+  --c-accent-border: rgba(124, 58, 237, 0.30);
+  --c-input-bg: #131620;
+  --c-nav-bg: #0a0c12;
+  --c-error: #f87171;
+  --c-ok: #22c55e;
+  --c-card-shadow: none;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #0f1117;
-  color: #e2e8f0;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--c-bg);
+  color: var(--c-text-body);
   min-height: 100vh;
+  transition: background 200ms ease, color 200ms ease;
 }
 
 a { color: inherit; text-decoration: none; }
