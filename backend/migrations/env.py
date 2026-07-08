@@ -21,11 +21,11 @@ database_url = os.environ.get("DATABASE_URL")
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# Model metadata for 'autogenerate' support.
+from backend.db import Base  # noqa: E402
+from backend import db_models  # noqa: E402,F401  (imported to populate Base.metadata)
+
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

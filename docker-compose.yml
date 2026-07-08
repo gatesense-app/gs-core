@@ -8,8 +8,10 @@ services:
       POSTGRES_USER: gatesense
       POSTGRES_PASSWORD: gatesense
       POSTGRES_DB: gatesense
+    # Published on 55432 to avoid colliding with a locally-installed Postgres on
+    # 5432. In-container services still reach it as db:5432.
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

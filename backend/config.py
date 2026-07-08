@@ -17,3 +17,23 @@ import os
 # `thinking={"type": "disabled"}` explicitly to keep the fast, no-thinking
 # behaviour the prompts were tuned for.
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://gatesense:gatesense@localhost:5432/gatesense",
+)
+
+# Non-superuser role the app SET ROLEs into so Postgres RLS is actually
+# enforced (a superuser connection bypasses RLS). Created in the initial
+# migration. See backend/deps.py:scoped_session.
+APP_DB_ROLE = os.getenv("APP_DB_ROLE", "app_rls")
+
+# ---------------------------------------------------------------------------
+# Auth (JWT)
+# ---------------------------------------------------------------------------
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-insecure-secret-change-in-prod")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "720"))  # 12h

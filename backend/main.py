@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from backend import session_store
 from backend.pipeline import handle_visitor_entry, handle_resident_reply
+from backend.routers import auth, residents, societies, users, visitors
 
 app = FastAPI(title="GateSense", version="0.1.0")
 
@@ -23,6 +24,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Admin + auth API (Phase 1)
+app.include_router(auth.router)
+app.include_router(societies.router)
+app.include_router(residents.router)
+app.include_router(users.router)
+app.include_router(visitors.router)
 
 
 # ---------------------------------------------------------------------------
