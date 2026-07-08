@@ -38,6 +38,23 @@ jobs:
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gatesense
+          POSTGRES_PASSWORD: gatesense
+          POSTGRES_DB: gatesense
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gatesense"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://gatesense:gatesense@localhost:5432/gatesense
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -49,11 +66,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run pipeline tests
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          PYTHONUTF8: "1"
-        run: python -m backend.test_pipeline
+      - name: Run migrations
+        run: alembic upgrade head
+
+      # RLS + DB-backed gate-tool tests (no Claude API). The live agent test is
+      # opt-in via RUN_AGENT_TESTS and stays out of CI.
+      - name: Run tests
+        run: python -m pytest backend/tests -v
 
   # ── Vercel preview deploy ─────────────────────────────────────────────────────
   preview:

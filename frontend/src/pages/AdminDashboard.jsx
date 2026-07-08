@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-
-const API = 'http://localhost:8000'
+import { apiFetch } from '../api'
 
 const STATUS_COLOR = {
   pending:            '#64748b',
@@ -54,8 +53,7 @@ export default function AdminDashboard() {
 
   async function load() {
     try {
-      const res = await fetch(`${API}/sessions`)
-      setSessions((await res.json()).reverse())
+      setSessions(await apiFetch('/sessions'))  // backend returns newest-first
     } catch { }
     setLoading(false)
   }

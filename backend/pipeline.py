@@ -1,32 +1,38 @@
 """
-Pipeline coordinator — chains Gate → Delivery → Intercom agents.
+Pipeline coordinator — chains Gate → Delivery → Intercom agents and persists
+the shared session (and its decision_trace) to Postgres.
 
-This module is the only place that knows about agent sequencing.
-Each agent remains independently importable and testable; the pipeline
-just interprets their outcomes and calls the next one.
+The session is a `visitor_sessions` row created up front so it has an id; each
+agent's outcome is appended to the row's decision_trace JSONB and the row's
+status/resolution is updated in place. Everything runs inside the request's
+tenant-scoped DB session, so writes are RLS-checked against the caller's society.
 
-How decision_trace gets built:
-  - Gate agent runs → we extract which tools it called from message_history
-    and write a TraceEntry to the session
-  - Same for Delivery agent
-  - Intercom agent writes its own conversation_history; we copy that in too
+Delivery and Intercom still use mock tools (retrofitted in Phases 3–4); the Gate
+agent is fully DB-backed as of Phase 2.
 """
 
-import json
-from backend.models import VisitorSession
-from backend import session_store
+from datetime import datetime, timezone
+
+from backend import db_models as m
 from backend.agents.gate_agent import run_gate_agent
 from backend.agents.delivery_agent import run_delivery_agent
 from backend.agents.intercom_agent import start_intercom_session, submit_reply as intercom_reply
+from backend.tools.gate_tools import GateContext, get_resident_rules
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _iso():
+    return _now().isoformat()
 
 
 # ---------------------------------------------------------------------------
-# Helpers to extract tool call names from raw agent message histories.
-# The agents return their full message_history so we can mine it for
-# the decision_trace without the agents needing to know about VisitorSession.
+# Mine the agent message histories for the decision_trace (agents stay unaware
+# of the DB — they just return their raw conversation).
 # ---------------------------------------------------------------------------
 def _extract_tool_calls(message_history: list) -> list[str]:
-    """Return ordered list of tool names Claude called in this agent's run."""
     calls = []
     for msg in message_history:
         if msg.get("role") == "assistant":
@@ -39,164 +45,154 @@ def _extract_tool_calls(message_history: list) -> list[str]:
 
 
 def _extract_agent_reasoning(message_history: list) -> str:
-    """Pull the agent's final text response as the reasoning summary."""
     for msg in reversed(message_history):
         if msg.get("role") == "assistant":
             content = msg.get("content", [])
             if isinstance(content, list):
                 for block in content:
                     if hasattr(block, "text"):
-                        return block.text[:300]   # cap at 300 chars for trace
+                        return block.text[:300]
     return ""
 
 
+def _trace_entry(agent, action, reasoning, tool_calls):
+    return {
+        "agent": agent,
+        "action": action,
+        "reasoning": reasoning,
+        "tool_calls": tool_calls,
+        "timestamp": _iso(),
+    }
+
+
+def serialize(row: m.VisitorSession) -> dict:
+    """API-facing shape (keeps the field names the frontend already uses)."""
+    return {
+        "session_id": str(row.id),
+        "visitor_name": row.visitor_name,
+        "flat_number": row.flat_number,
+        "purpose": row.purpose,
+        "purpose_detail": row.purpose_detail,
+        "status": row.status,
+        "resolved_by": row.resolved_by,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "entry_time": row.entry_time.isoformat() if row.entry_time else None,
+        "decision_trace": row.decision_trace or [],
+        "conversation_history": row.conversation_history or [],
+    }
+
+
 # ---------------------------------------------------------------------------
-# Entry point — called by POST /sessions
+# Called by POST /sessions
 # ---------------------------------------------------------------------------
-def handle_visitor_entry(
-    visitor_name: str,
-    flat_number: str,
-    purpose: str,
-    purpose_detail: str,
-) -> VisitorSession:
-    """
-    Start a new visitor session and run it through the pipeline as far
-    as it can go synchronously. If the intercom agent is needed, the
-    session pauses at status=awaiting_resident and waits for reply calls.
-    """
-    # Create and persist the session immediately so it's queryable right away
-    session = VisitorSession(
+def handle_visitor_entry(db, society_id, visitor_name, flat_number, purpose, purpose_detail) -> m.VisitorSession:
+    row = m.VisitorSession(
+        society_id=society_id,
         visitor_name=visitor_name,
         flat_number=flat_number,
         purpose=purpose,
         purpose_detail=purpose_detail,
+        status="pending",
+        decision_trace=[],
+        conversation_history=[],
     )
-    session_store.create(session)
-    print(f"\n[Pipeline] New session {session.session_id}: {visitor_name} -> {flat_number}")
+    db.add(row)
+    db.flush()  # populate row.id
 
-    # ------------------------------------------------------------------
-    # STAGE 1: Gate Visitor Agent
-    # ------------------------------------------------------------------
-    gate_result = run_gate_agent(
-        visitor_name=visitor_name,
-        flat_number=flat_number,
-        purpose=purpose,
-        purpose_detail=purpose_detail,
-    )
+    ctx = GateContext(db, society_id, row.id)
+    trace: list[dict] = []
 
-    tool_calls = _extract_tool_calls(gate_result["message_history"])
-    reasoning = _extract_agent_reasoning(gate_result["message_history"])
+    # STAGE 1: Gate Visitor Agent (DB-backed)
+    gate_result = run_gate_agent(ctx, visitor_name, flat_number, purpose, purpose_detail)
     outcome = gate_result["outcome"]
+    trace.append(_trace_entry(
+        "gate",
+        f"gate_decision: {outcome}",
+        _extract_agent_reasoning(gate_result["message_history"]),
+        _extract_tool_calls(gate_result["message_history"]),
+    ))
 
-    session.add_trace(
-        agent="gate",
-        action=f"gate_decision: {outcome}",
-        reasoning=reasoning,
-        tool_calls=tool_calls,
-    )
+    if outcome in ("auto_approved", "denied"):
+        row.status = outcome
+        row.resolved_by = "agent"
+        row.resolved_at = _now()
+        row.decision_trace = trace
+        db.flush()
+        return row
 
-    if outcome == "auto_approved":
-        session.resolve("auto_approved", resolved_by="agent")
-        session_store.update(session)
-        return session
-
-    if outcome == "denied":
-        session.resolve("denied", resolved_by="agent")
-        session_store.update(session)
-        return session
-
-    # ------------------------------------------------------------------
-    # STAGE 2: Delivery Triage Agent (only if gate routed here)
-    # ------------------------------------------------------------------
+    # STAGE 2: Delivery Triage Agent (mock until Phase 3)
     if outcome == "routed_delivery":
         delivery_result = run_delivery_agent(
-            session_id=session.session_id,
+            session_id=str(row.id),
             visitor_name=visitor_name,
             flat_number=flat_number,
             purpose_detail=purpose_detail,
         )
-
-        d_tool_calls = _extract_tool_calls(delivery_result["message_history"])
-        d_reasoning = _extract_agent_reasoning(delivery_result["message_history"])
         d_outcome = delivery_result["outcome"]
-
-        session.add_trace(
-            agent="delivery",
-            action=f"delivery_decision: {d_outcome}",
-            reasoning=d_reasoning,
-            tool_calls=d_tool_calls,
-        )
-
+        trace.append(_trace_entry(
+            "delivery",
+            f"delivery_decision: {d_outcome}",
+            _extract_agent_reasoning(delivery_result["message_history"]),
+            _extract_tool_calls(delivery_result["message_history"]),
+        ))
         if d_outcome == "auto_approved":
-            session.resolve("auto_approved", resolved_by="agent")
-            session_store.update(session)
-            return session
-
-        # Delivery agent flagged anomaly → falls through to intercom
+            row.status = "auto_approved"
+            row.resolved_by = "agent"
+            row.resolved_at = _now()
+            row.decision_trace = trace
+            db.flush()
+            return row
         outcome = "routed_intercom"
 
-    # ------------------------------------------------------------------
-    # STAGE 3: Intercom Conversational Agent
-    # ------------------------------------------------------------------
+    # STAGE 3: Intercom Conversational Agent (mock until Phase 4)
     if outcome == "routed_intercom":
-        # Look up resident name for the notification
-        # In prod this comes from the DB; here we re-use the mock tool
-        from backend.tools.gate_tools import get_resident_rules
-        rules = get_resident_rules(flat_number)
-        resident_name = rules.get("resident_name", "Resident")
-
+        resident_name = get_resident_rules(ctx, flat_number).get("resident_name", "Resident")
         start_intercom_session(
-            session_id=session.session_id,
+            session_id=str(row.id),
             flat_number=flat_number,
             visitor_name=visitor_name,
             purpose_detail=purpose_detail,
             resident_name=resident_name,
         )
+        row.status = "awaiting_resident"
+        trace.append(_trace_entry(
+            "intercom",
+            "notification_sent",
+            f"No standing rule matched. Resident {resident_name} notified for confirmation.",
+            ["send_notification", "log_conversation_turn"],
+        ))
 
-        session.status = "awaiting_resident"
-        session.add_trace(
-            agent="intercom",
-            action="notification_sent",
-            reasoning=f"No standing rule matched. Resident {resident_name} notified for confirmation.",
-            tool_calls=["send_notification", "log_conversation_turn"],
-        )
-        session_store.update(session)
-
-    return session
+    row.decision_trace = trace
+    db.flush()
+    return row
 
 
 # ---------------------------------------------------------------------------
-# Called by POST /sessions/{session_id}/reply
+# Called by POST /sessions/{id}/reply
 # ---------------------------------------------------------------------------
-def handle_resident_reply(session_id: str, reply: str) -> VisitorSession:
-    """
-    Resume the paused intercom graph with the resident's reply.
-    Updates and returns the session.
-    """
-    session = session_store.get(session_id)
-    if session is None:
-        raise ValueError(f"Session {session_id} not found")
+def handle_resident_reply(db, row: m.VisitorSession, reply: str) -> m.VisitorSession:
+    result = intercom_reply(str(row.id), reply)
 
-    result = intercom_reply(session_id, reply)
-
-    # Append this reply turn to the session's conversation history
-    session.conversation_history.append({"speaker": "resident", "message": reply})
+    conversation = list(row.conversation_history or [])
+    conversation.append({"speaker": "resident", "message": reply})
+    trace = list(row.decision_trace or [])
 
     if result["done"]:
         decision = result["decision"]
-        status_map = {"approved": "approved", "denied": "denied", "escalated": "escalated"}
-        final_status = status_map.get(decision, "approved")
-
-        session.resolve(final_status, resolved_by="resident")
-        session.add_trace(
-            agent="intercom",
-            action=f"resident_decision: {final_status}",
-            reasoning=result["decision_reason"],
-            tool_calls=["update_visitor_session"],
-        )
+        final_status = {"approved": "approved", "denied": "denied", "escalated": "escalated"}.get(decision, "approved")
+        row.status = final_status
+        row.resolved_by = "resident"
+        row.resolved_at = _now()
+        trace.append(_trace_entry(
+            "intercom",
+            f"resident_decision: {final_status}",
+            result.get("decision_reason", ""),
+            ["update_visitor_session"],
+        ))
     else:
-        # Still in clarification loop — update conversation history only
-        session.conversation_history.append({"speaker": "agent", "message": "(relayed to guard)"})
+        conversation.append({"speaker": "agent", "message": "(relayed to guard)"})
 
-    session_store.update(session)
-    return session
+    row.conversation_history = conversation
+    row.decision_trace = trace
+    db.flush()
+    return row

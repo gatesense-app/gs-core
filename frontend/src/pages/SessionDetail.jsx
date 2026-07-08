@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-
-const API = 'http://localhost:8000'
+import { apiFetch } from '../api'
 
 const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' }
 const STATUS_COLOR = {
@@ -85,8 +84,9 @@ export default function SessionDetail() {
   const [sending, setSending] = useState(false)
 
   async function load() {
-    const res = await fetch(`${API}/sessions/${id}`)
-    if (res.ok) setSession(await res.json())
+    try {
+      setSession(await apiFetch(`/sessions/${id}`))
+    } catch { /* not found / not authorized */ }
   }
 
   useEffect(() => {
@@ -99,11 +99,9 @@ export default function SessionDetail() {
     e.preventDefault()
     if (!reply.trim()) return
     setSending(true)
-    await fetch(`${API}/sessions/${id}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reply }),
-    })
+    try {
+      await apiFetch(`/sessions/${id}/reply`, { method: 'POST', body: { reply } })
+    } catch { /* surfaced on next poll */ }
     setReply('')
     setSending(false)
     load()

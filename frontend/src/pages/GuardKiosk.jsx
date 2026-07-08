@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-
-const API = 'http://localhost:8000'
+import { apiFetch } from '../api'
 
 const field = {
   width: '100%', padding: '10px 14px', borderRadius: 8,
@@ -40,13 +39,7 @@ export default function GuardKiosk() {
     e.preventDefault()
     setLoading(true); setError('')
     try {
-      const res = await fetch(`${API}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const session = await res.json()
+      const session = await apiFetch('/sessions', { method: 'POST', body: form })
       nav(`/session/${session.session_id}`)
     } catch (err) {
       setError(err.message)
