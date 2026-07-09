@@ -7,8 +7,11 @@ agent's outcome is appended to the row's decision_trace JSONB and the row's
 status/resolution is updated in place. Everything runs inside the request's
 tenant-scoped DB session, so writes are RLS-checked against the caller's society.
 
-The Gate (Phase 2) and Delivery (Phase 3) agents are fully DB-backed; Intercom
-still uses mock tools (retrofitted in Phase 4).
+All three agents are DB-backed: Gate (Phase 2), Delivery (Phase 3), and Intercom
+(Phase 4). The intercom agent is a LangGraph graph that pauses on interrupt() and
+resumes on the resident's reply; its tenant-scoped DB session is injected per run
+via config (see intercom_agent), and it persists conversation_log / escalations /
+notification_delivery_log rows as it goes.
 """
 
 from datetime import datetime, timezone
@@ -19,6 +22,7 @@ from backend.agents.delivery_agent import run_delivery_agent
 from backend.agents.intercom_agent import start_intercom_session, submit_reply as intercom_reply
 from backend.tools.gate_tools import GateContext, get_resident_rules
 from backend.tools.delivery_tools import DeliveryContext
+from backend.tools.intercom_tools import IntercomContext
 
 
 def _now():
@@ -146,17 +150,17 @@ def handle_visitor_entry(db, society_id, visitor_name, flat_number, purpose, pur
             return row
         outcome = "routed_intercom"
 
-    # STAGE 3: Intercom Conversational Agent (mock until Phase 4)
+    # STAGE 3: Intercom Conversational Agent (DB-backed LangGraph)
     if outcome == "routed_intercom":
-        resident_name = get_resident_rules(ctx, flat_number).get("resident_name", "Resident")
-        start_intercom_session(
-            session_id=str(row.id),
-            flat_number=flat_number,
-            visitor_name=visitor_name,
-            purpose_detail=purpose_detail,
-            resident_name=resident_name,
+        intercom_ctx = IntercomContext(db, society_id, row.id)
+        resident_name = get_resident_rules(intercom_ctx, flat_number).get("resident_name", "Resident")
+        intercom_result = start_intercom_session(
+            intercom_ctx, flat_number, visitor_name, purpose_detail, resident_name,
         )
         row.status = "awaiting_resident"
+        # Mirror the graph's conversation onto the row for the UI (the tools also
+        # persisted each turn to conversation_log).
+        row.conversation_history = intercom_result.get("conversation_history", [])
         trace.append(_trace_entry(
             "intercom",
             "notification_sent",
@@ -173,28 +177,36 @@ def handle_visitor_entry(db, society_id, visitor_name, flat_number, purpose, pur
 # Called by POST /sessions/{id}/reply
 # ---------------------------------------------------------------------------
 def handle_resident_reply(db, row: m.VisitorSession, reply: str) -> m.VisitorSession:
-    result = intercom_reply(str(row.id), reply)
+    intercom_ctx = IntercomContext(db, row.society_id, row.id)
+    result = intercom_reply(intercom_ctx, reply)
 
-    conversation = list(row.conversation_history or [])
-    conversation.append({"speaker": "resident", "message": reply})
+    # The graph's tools already updated the row's status (update_visitor_session)
+    # and wrote each turn to conversation_log; mirror the authoritative
+    # conversation onto the row for the UI.
+    row.conversation_history = result.get("conversation_history", row.conversation_history or [])
+
     trace = list(row.decision_trace or [])
-
     if result["done"]:
-        decision = result["decision"]
-        final_status = {"approved": "approved", "denied": "denied", "escalated": "escalated"}.get(decision, "approved")
-        row.status = final_status
-        row.resolved_by = "resident"
-        row.resolved_at = _now()
+        if row.status == "escalated":
+            tools = ["escalate_to_backup_contact", "update_visitor_session"]
+        else:
+            tools = ["update_visitor_session"]
         trace.append(_trace_entry(
             "intercom",
-            f"resident_decision: {final_status}",
+            f"resident_decision: {row.status}",
             result.get("decision_reason", ""),
-            ["update_visitor_session"],
+            tools,
         ))
     else:
-        conversation.append({"speaker": "agent", "message": "(relayed to guard)"})
+        # A clarification is in flight (resident asked a question, or the guard's
+        # answer was relayed back) — still awaiting the resident's final call.
+        trace.append(_trace_entry(
+            "intercom",
+            "clarification_in_progress",
+            "Resident asked a question; relayed to the guard, awaiting the resident's decision.",
+            ["send_notification", "log_conversation_turn"],
+        ))
 
-    row.conversation_history = conversation
     row.decision_trace = trace
     db.flush()
     return row
