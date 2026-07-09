@@ -7,8 +7,8 @@ agent's outcome is appended to the row's decision_trace JSONB and the row's
 status/resolution is updated in place. Everything runs inside the request's
 tenant-scoped DB session, so writes are RLS-checked against the caller's society.
 
-Delivery and Intercom still use mock tools (retrofitted in Phases 3–4); the Gate
-agent is fully DB-backed as of Phase 2.
+The Gate (Phase 2) and Delivery (Phase 3) agents are fully DB-backed; Intercom
+still uses mock tools (retrofitted in Phase 4).
 """
 
 from datetime import datetime, timezone
@@ -18,6 +18,7 @@ from backend.agents.gate_agent import run_gate_agent
 from backend.agents.delivery_agent import run_delivery_agent
 from backend.agents.intercom_agent import start_intercom_session, submit_reply as intercom_reply
 from backend.tools.gate_tools import GateContext, get_resident_rules
+from backend.tools.delivery_tools import DeliveryContext
 
 
 def _now():
@@ -120,10 +121,11 @@ def handle_visitor_entry(db, society_id, visitor_name, flat_number, purpose, pur
         db.flush()
         return row
 
-    # STAGE 2: Delivery Triage Agent (mock until Phase 3)
+    # STAGE 2: Delivery Triage Agent (DB-backed)
     if outcome == "routed_delivery":
+        delivery_ctx = DeliveryContext(db, society_id, row.id)
         delivery_result = run_delivery_agent(
-            session_id=str(row.id),
+            delivery_ctx,
             visitor_name=visitor_name,
             flat_number=flat_number,
             purpose_detail=purpose_detail,
