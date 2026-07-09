@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api'
+import { openSessionsSocket } from '../realtime'
 
 const STATUS_COLOR = {
   pending:            '#64748b',
@@ -39,7 +40,7 @@ const s = {
     fontSize: 11, padding: '2px 7px', borderRadius: 4,
     background: AGENT_COLOR[agent] + '22', color: AGENT_COLOR[agent],
   }),
-  time: { fontSize: 12, color: '#475569' },
+  time: { fontSize: 12, color: 'var(--c-muted)' },
 }
 
 function fmt(iso) {
@@ -58,7 +59,23 @@ export default function AdminDashboard() {
     setLoading(false)
   }
 
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [])
+  // Insert or replace a session pushed over the WebSocket (newest first).
+  function upsert(sess) {
+    setSessions(prev => {
+      const idx = prev.findIndex(x => x.session_id === sess.session_id)
+      if (idx === -1) return [sess, ...prev]
+      const next = [...prev]
+      next[idx] = sess
+      return next
+    })
+  }
+
+  useEffect(() => {
+    load()
+    const stop = openSessionsSocket(msg => { if (msg.type === 'session_update') upsert(msg.session) })
+    const t = setInterval(load, 15000)  // fallback in case the socket drops
+    return () => { stop(); clearInterval(t) }
+  }, [])
 
   return (
     <div style={s.page}>
@@ -69,7 +86,7 @@ export default function AdminDashboard() {
 
       {loading && <div style={s.empty}>Loading...</div>}
       {!loading && sessions.length === 0 && (
-        <div style={s.empty}>No sessions yet. <Link to="/kiosk" style={{ color: 'var(--c-accent)' }}>Submit a visitor</Link> to get started.</div>
+        <div style={s.empty}>No sessions yet. <Link to="/kiosk" style={{ color: 'var(--c-link)', fontWeight: 600 }}>Submit a visitor</Link> to get started.</div>
       )}
 
       {sessions.length > 0 && (

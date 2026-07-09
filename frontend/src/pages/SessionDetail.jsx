@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
+import { openSessionsSocket } from '../realtime'
 
 const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' }
 const STATUS_COLOR = {
@@ -56,7 +57,7 @@ const s = {
   },
   replyBtn: {
     padding: '10px 20px', borderRadius: 8, border: 'none',
-    background: 'linear-gradient(135deg, var(--c-accent), var(--c-accent-2))', color: '#fff', fontSize: 14, fontWeight: 700,
+    background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)', fontSize: 14, fontWeight: 700,
   },
 
   // Conversation
@@ -66,7 +67,7 @@ const s = {
   }),
   bubble: (speaker) => ({
     maxWidth: '75%', padding: '8px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.5,
-    background: speaker === 'resident' ? 'var(--c-accent)' : speaker === 'guard' ? 'rgba(16,185,129,0.14)' : 'var(--c-panel-alt)',
+    background: speaker === 'resident' ? 'var(--c-accent-2)' : speaker === 'guard' ? 'rgba(16,185,129,0.14)' : 'var(--c-panel-alt)',
     color: speaker === 'resident' ? '#fff' : 'var(--c-text)',
   }),
   speakerLabel: { fontSize: 10, color: 'var(--c-muted)', marginBottom: 4, textTransform: 'uppercase' },
@@ -91,8 +92,11 @@ export default function SessionDetail() {
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
+    const stop = openSessionsSocket(msg => {
+      if (msg.type === 'session_update' && msg.session.session_id === id) setSession(msg.session)
+    })
+    const t = setInterval(load, 10000)  // fallback in case the socket drops
+    return () => { stop(); clearInterval(t) }
   }, [id])
 
   async function sendReply(e) {

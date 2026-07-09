@@ -17,8 +17,8 @@ const s = {
   select: field,
   btn: {
     width: '100%', padding: '12px', borderRadius: 8,
-    background: 'linear-gradient(135deg, var(--c-accent), var(--c-accent-2))',
-    border: 'none', color: '#fff', fontSize: 15, fontWeight: 700,
+    background: 'var(--c-btn-bg)',
+    border: 'none', color: 'var(--c-btn-text)', fontSize: 15, fontWeight: 700,
     boxShadow: '0 6px 16px -8px var(--c-accent)',
   },
   error: { color: 'var(--c-error)', fontSize: 13, marginTop: 12 },

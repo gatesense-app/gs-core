@@ -28,8 +28,8 @@ export const ui = {
   },
   btn: {
     padding: '10px 18px', borderRadius: 8,
-    background: 'linear-gradient(135deg, var(--c-accent), var(--c-accent-2))',
-    border: 'none', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+    background: 'var(--c-btn-bg)',
+    border: 'none', color: 'var(--c-btn-text)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
     boxShadow: '0 6px 16px -8px var(--c-accent)',
   },
   btnGhost: {

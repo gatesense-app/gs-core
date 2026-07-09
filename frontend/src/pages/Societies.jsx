@@ -42,7 +42,7 @@ export default function Societies() {
       <div style={ui.sub}>Onboard a society and create its administrator.</div>
 
       <form style={ui.card} onSubmit={create}>
-        <div style={{ ...ui.label, fontSize: 14, color: '#e2e8f0', marginBottom: 14 }}>New society</div>
+        <div style={{ ...ui.label, fontSize: 14, color: 'var(--c-text)', marginBottom: 14 }}>New society</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
             <label style={ui.label}>Society name</label>
@@ -77,7 +77,7 @@ export default function Societies() {
           {rows.map((s) => (
             <tr key={s.id}>
               <td style={{ ...ui.td, fontWeight: 500 }}>{s.name}</td>
-              <td style={{ ...ui.td, color: '#94a3b8' }}>{s.address || '—'}</td>
+              <td style={{ ...ui.td, color: 'var(--c-muted)' }}>{s.address || '—'}</td>
             </tr>
           ))}
         </tbody>

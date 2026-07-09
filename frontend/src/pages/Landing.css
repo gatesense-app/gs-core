@@ -1,23 +1,25 @@
 .landing {
-  --bg: #f8fafc;
-  --bg-nav: rgba(248, 250, 252, 0.85);
+  --bg: #ffffff;
+  --bg-nav: rgba(255, 255, 255, 0.85);
   --surface: #ffffff;
-  --surface-alt: #f1f5f9;
-  --border: #e2e8f0;
-  --text: #334155;
-  --text-strong: #0f172a;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
-  --primary: #4f46e5;
-  --primary-end: #7c3aed;
-  --primary-solid: #4f46e5;
+  --surface-alt: rgba(1, 13, 82, 0.045);
+  --border: rgba(1, 13, 82, 0.12);
+  --text: rgba(1, 13, 82, 0.82);
+  --text-strong: #010d52;
+  --text-muted: rgba(1, 13, 82, 0.62);
+  --text-faint: rgba(1, 13, 82, 0.45);
+  --primary: #010d52;          /* navy — primary text, gradient start, borders, focus */
+  --primary-end: #1ed5c5;      /* turquoise — accent / gradient end */
+  --primary-solid: #010d52;
+  --accent: #1ed5c5;           /* turquoise — buttons, highlights */
+  --accent-ink: #010d52;       /* readable text on a turquoise fill */
   --success: #10b981;
   --success-text: #047857;
   --warning: #f59e0b;
   --warning-text: #b45309;
   --danger: #ef4444;
   --danger-text: #b91c1c;
-  --shadow-tint: rgba(79, 70, 229, 0.1);
+  --shadow-tint: rgba(1, 13, 82, 0.14);
 
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
@@ -67,11 +69,11 @@
   transition: filter 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 .lp-btn--primary {
-  background: linear-gradient(135deg, var(--primary), var(--primary-end));
-  color: #fff;
-  box-shadow: 0 8px 20px -6px rgba(79, 70, 229, 0.45);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 8px 20px -6px rgba(30, 213, 197, 0.5);
 }
-.lp-btn--primary:hover { filter: brightness(1.08); }
+.lp-btn--primary:hover { filter: brightness(1.05); }
 .lp-btn--ghost {
   background: #fff;
   border-color: var(--border);
@@ -111,13 +113,16 @@
   gap: 32px;
 }
 .lp-logo {
-  font-weight: 800;
-  font-size: 18px;
-  background: linear-gradient(135deg, var(--primary), var(--primary-end));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: center;
+}
+.lp-logo-img {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+.lp-logo-img--footer {
+  height: 34px;
 }
 .lp-nav-links {
   display: none;
@@ -183,8 +188,8 @@
   font-size: 12px;
   font-weight: 700;
   color: var(--primary);
-  background: rgba(79, 70, 229, 0.08);
-  border: 1px solid rgba(79, 70, 229, 0.2);
+  background: rgba(30, 213, 197, 0.12);
+  border: 1px solid rgba(30, 213, 197, 0.32);
   padding: 6px 12px;
   border-radius: 99px;
   margin-bottom: 20px;
@@ -350,7 +355,7 @@
   transition: border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
 }
 .lp-feature-card:hover {
-  border-color: rgba(79, 70, 229, 0.35);
+  border-color: rgba(30, 213, 197, 0.55);
   transform: translateY(-2px);
   box-shadow: 0 12px 24px -12px var(--shadow-tint);
 }
@@ -358,7 +363,7 @@
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: rgba(79, 70, 229, 0.1);
+  background: rgba(30, 213, 197, 0.14);
   color: var(--primary);
   display: flex;
   align-items: center;
@@ -385,8 +390,8 @@
   box-shadow: 0 2px 8px -4px rgba(15, 23, 42, 0.06);
 }
 .lp-plan--popular {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 1px rgba(79,70,229,0.35), 0 20px 45px -22px var(--shadow-tint);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(30, 213, 197, 0.55), 0 20px 45px -22px var(--shadow-tint);
 }
 .lp-plan-badge {
   position: absolute;

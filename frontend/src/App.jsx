@@ -1,9 +1,8 @@
-import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth'
 import { ROLE_HOME } from './pages/Login'
-import { getTheme, toggleTheme } from './theme'
 import { colors } from './ui'
+import logoUrl from './assets/logo/gs-logo-horizontal.png'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Societies from './pages/Societies'
@@ -19,17 +18,9 @@ const navBar = {
   background: 'var(--c-nav-bg)', backdropFilter: 'blur(10px)',
   position: 'sticky', top: 0, zIndex: 50,
 }
-const logo = {
-  fontWeight: 800, fontSize: 18, letterSpacing: '-0.02em',
-  background: 'linear-gradient(135deg, var(--c-accent), var(--c-accent-2))',
-  WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
-}
+const logoLink = { display: 'flex', alignItems: 'center' }
+const logoImg = { height: 26, width: 'auto', display: 'block' }
 const navLink = { fontSize: 14, color: colors.sub, textDecoration: 'none' }
-const toggleBtn = {
-  background: 'none', border: `1px solid ${colors.border}`, color: colors.sub,
-  width: 32, height: 32, borderRadius: 8, cursor: 'pointer', fontSize: 15,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-}
 
 // Which nav links each role sees.
 const LINKS = {
@@ -42,25 +33,16 @@ const LINKS = {
 function AppNav() {
   const { user, logout } = useAuth()
   const { pathname } = useLocation()
-  const [theme, setTheme] = useState(getTheme())
   if (pathname === '/' || pathname === '/login') return null
 
   return (
     <nav style={navBar}>
-      <Link to="/home" style={logo}>GateSense</Link>
+      <Link to="/home" style={logoLink}><img src={logoUrl} alt="GateSense" style={logoImg} /></Link>
       {(LINKS[user?.role] || []).map(([to, label]) => (
         <Link key={to} to={to} style={pathname === to ? { ...navLink, color: colors.text } : navLink}>{label}</Link>
       ))}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
         {user && <span style={{ fontSize: 13, color: colors.muted }}>{user.email} · {user.role}</span>}
-        <button
-          onClick={() => setTheme(toggleTheme())}
-          style={toggleBtn}
-          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-          aria-label="Toggle theme"
-        >
-          {theme === 'dark' ? '☀' : '☾'}
-        </button>
         {user && <button onClick={logout} style={{ ...navLink, background: 'none', border: 'none', cursor: 'pointer' }}>Sign out</button>}
       </div>
     </nav>

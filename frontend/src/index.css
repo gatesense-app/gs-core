@@ -1,51 +1,43 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ---------------------------------------------------------------------------
-   Theme tokens. Light is the default (mirrors the landing page); dark is opt-in
-   via data-theme="dark" on <html>. See src/theme.js.
+   Single brand theme. Three colors only:
+     white     #ffffff  — surfaces / page
+     dark blue #010d52  — text, logo, borders (navy)
+     turquoise #1ed5c5  — accent, primary buttons, focus, highlights
+   Neutrals are navy at reduced opacity; status/agent colors stay semantic.
 --------------------------------------------------------------------------- */
 :root {
-  --c-bg: #f8fafc;
+  --c-navy: #010d52;
+  --c-turq: #1ed5c5;
+
+  --c-bg: #ffffff;
   --c-panel: #ffffff;
-  --c-panel-alt: #f1f5f9;
-  --c-border: #e2e8f0;
-  --c-row-border: #eef2f7;
-  --c-text: #0f172a;
-  --c-text-body: #334155;
-  --c-sub: #64748b;
-  --c-muted: #94a3b8;
-  --c-accent: #4f46e5;
-  --c-accent-2: #7c3aed;
-  --c-accent-soft: #4f46e5;
-  --c-accent-bg: rgba(79, 70, 229, 0.08);
-  --c-accent-border: rgba(79, 70, 229, 0.22);
+  --c-panel-alt: rgba(1, 13, 82, 0.045);
+  --c-border: rgba(1, 13, 82, 0.14);
+  --c-row-border: rgba(1, 13, 82, 0.07);
+  --c-text: #010d52;
+  --c-text-body: rgba(1, 13, 82, 0.82);
+  --c-sub: rgba(1, 13, 82, 0.62);
+  --c-muted: rgba(1, 13, 82, 0.45);
+
+  /* Accent (turquoise) — for fills, focus, borders, decoration. */
+  --c-accent: #1ed5c5;
+  --c-accent-2: #010d52;          /* navy — gradient partner (logo, decoration) */
+  --c-accent-soft: #010d52;       /* accent TEXT on white must be navy (turquoise fails contrast) */
+  --c-accent-bg: rgba(30, 213, 197, 0.14);
+  --c-accent-border: rgba(30, 213, 197, 0.5);
+  --c-link: #010d52;
+
+  /* Primary button: solid turquoise + navy text (~9:1 contrast). */
+  --c-btn-bg: #1ed5c5;
+  --c-btn-text: #010d52;
+
   --c-input-bg: #ffffff;
   --c-nav-bg: rgba(255, 255, 255, 0.85);
   --c-error: #dc2626;
   --c-ok: #059669;
-  --c-card-shadow: 0 2px 10px -6px rgba(15, 23, 42, 0.12);
-}
-
-:root[data-theme="dark"] {
-  --c-bg: #0f1117;
-  --c-panel: #131620;
-  --c-panel-alt: #1e2130;
-  --c-border: #1e2130;
-  --c-row-border: #0f1117;
-  --c-text: #f1f5f9;
-  --c-text-body: #e2e8f0;
-  --c-sub: #94a3b8;
-  --c-muted: #64748b;
-  --c-accent: #7c3aed;
-  --c-accent-2: #a78bfa;
-  --c-accent-soft: #a78bfa;
-  --c-accent-bg: rgba(124, 58, 237, 0.16);
-  --c-accent-border: rgba(124, 58, 237, 0.30);
-  --c-input-bg: #131620;
-  --c-nav-bg: #0a0c12;
-  --c-error: #f87171;
-  --c-ok: #22c55e;
-  --c-card-shadow: none;
+  --c-card-shadow: 0 2px 14px -8px rgba(1, 13, 82, 0.28);
 }
 
 body {
@@ -53,7 +45,6 @@ body {
   background: var(--c-bg);
   color: var(--c-text-body);
   min-height: 100vh;
-  transition: background 200ms ease, color 200ms ease;
 }
 
 a { color: inherit; text-decoration: none; }

@@ -114,7 +114,7 @@ export default function Residents() {
       <div style={ui.sub}>{rows.length} residents. Manage flats and standing rules.</div>
 
       <form style={ui.card} onSubmit={create}>
-        <div style={{ ...ui.label, fontSize: 14, color: '#e2e8f0', marginBottom: 14 }}>New resident</div>
+        <div style={{ ...ui.label, fontSize: 14, color: 'var(--c-text)', marginBottom: 14 }}>New resident</div>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           {isPlatform && (
             <div style={{ width: 200 }}>
