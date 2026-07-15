@@ -58,8 +58,34 @@ DATABASE_URL = os.getenv(
 APP_DB_ROLE = os.getenv("APP_DB_ROLE", "app_rls")
 
 # ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+# "development" locally; set APP_ENV=production on Railway. Guards below refuse
+# to boot with insecure dev defaults in production.
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+
+# ---------------------------------------------------------------------------
 # Auth (JWT)
 # ---------------------------------------------------------------------------
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-insecure-secret-change-in-prod")
+_DEV_JWT_SECRET = "dev-insecure-secret-change-in-prod"
+JWT_SECRET = os.getenv("JWT_SECRET", _DEV_JWT_SECRET)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "720"))  # 12h
+
+if IS_PRODUCTION and JWT_SECRET == _DEV_JWT_SECRET:
+    # Shipping the dev secret would let anyone mint a platform_admin token for
+    # any society. Refuse to start rather than serve traffic that can be forged.
+    raise RuntimeError(
+        "JWT_SECRET is still the development default while APP_ENV=production. "
+        "Set a strong random JWT_SECRET (e.g. `openssl rand -hex 32`) before deploying."
+    )
+
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
+# The SPA is served from a different origin in production (Vercel /
+# gatesense.in), so the deployed origins must be configurable. Comma-separated.
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
+]

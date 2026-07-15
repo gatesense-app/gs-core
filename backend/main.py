@@ -31,6 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from backend import db_models as m
 from backend import errors
+from backend.config import CORS_ORIGINS
 from backend.deps import (
     CurrentUser,
     get_db,
@@ -59,9 +60,11 @@ app = FastAPI(title="GateSense", version="0.1.0", lifespan=lifespan)
 # One error shape everywhere; unhandled errors never leak internals (Phase 7).
 errors.install(app)
 
+# Origins are env-driven (CORS_ORIGINS): the SPA lives on a different origin in
+# production (Vercel / gatesense.in) than in dev (localhost:5173).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

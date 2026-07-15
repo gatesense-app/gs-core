@@ -31,6 +31,12 @@ services:
       DATABASE_URL: postgresql://gatesense:gatesense@db:5432/gatesense
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      # The image defaults to APP_ENV=production (safe for Railway), which
+      # refuses to boot on the dev JWT secret. Locally we want the dev default.
+      APP_ENV: development
+      # Local dev often sits behind a TLS-intercepting proxy; pass it through.
+      ANTHROPIC_SSL_VERIFY: ${ANTHROPIC_SSL_VERIFY:-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     ports:
       - "8000:8000"
 
