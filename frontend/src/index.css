@@ -29,9 +29,13 @@
   --c-accent-border: rgba(30, 213, 197, 0.5);
   --c-link: #010d52;
 
-  /* Primary button: solid turquoise + navy text (~9:1 contrast). */
-  --c-btn-bg: #1ed5c5;
-  --c-btn-text: #010d52;
+  /* Primary button: solid navy + white text (17.8:1).
+     Turquoise fill was tried first and read washed-out next to the navy
+     headings, and it can never take white text (1.85:1). Navy carries the
+     weight a primary action needs; turquoise stays the accent — eyebrow badge,
+     live dot, chips, feature icons, focus ring and hover. */
+  --c-btn-bg: #010d52;
+  --c-btn-text: #ffffff;
 
   --c-input-bg: #ffffff;
   --c-nav-bg: rgba(255, 255, 255, 0.85);
@@ -99,8 +103,12 @@ button { cursor: pointer; font-family: inherit; }
    cursor:pointer the whole time. */
 .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
 
-/* One primary per view. Navy on turquoise = 9.6:1. */
+/* One primary per view. White on navy = 17.8:1. */
 .btn--primary { background: var(--c-btn-bg); color: var(--c-btn-text); }
+/* Override the shared darken: on a near-black navy, brightness(0.94) is
+   invisible, so the primary lightens on hover instead. */
+.btn--primary:hover:not(:disabled) { filter: brightness(1.6); }
+.btn--primary:active:not(:disabled) { filter: brightness(1.3); }
 
 /* Subordinate: same shape, quieter. */
 .btn--secondary {
