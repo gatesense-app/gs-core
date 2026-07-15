@@ -6,13 +6,8 @@ const STATUS_COLOR = { sent: '#22c55e', delivered: '#22c55e', failed: '#ef4444' 
 
 const s = {
   page: { padding: '32px 28px' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  title: { fontSize: 20, fontWeight: 700, color: 'var(--c-text)' },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 16 },
   sub: { fontSize: 13, color: 'var(--c-muted)', marginBottom: 24 },
-  refresh: {
-    padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)',
-    background: 'transparent', color: 'var(--c-sub)', fontSize: 13,
-  },
   stats: { display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 },
   stat: {
     border: '1px solid var(--c-border)', borderRadius: 10, padding: '14px 18px',
@@ -69,8 +64,8 @@ export default function Notifications() {
   return (
     <div style={s.page}>
       <div style={s.header}>
-        <div style={s.title}>Notification health</div>
-        <button style={s.refresh} onClick={load}>Refresh</button>
+        <h1 className="page-title">Notification health</h1>
+        <button className="btn btn--ghost" onClick={load}>Refresh</button>
       </div>
       <div style={s.sub}>Every message the intercom agent sent to a resident, and whether it landed.</div>
 

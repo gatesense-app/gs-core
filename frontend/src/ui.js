@@ -1,5 +1,11 @@
-// Shared style primitives. Colors reference CSS variables (see index.css) so
-// everything re-themes when the data-theme attribute flips.
+// Shared style primitives.
+//
+// Buttons and inputs are NOT here — they're CSS classes in index.css (.btn,
+// .input), because :hover / :focus-visible / :disabled can't be expressed in
+// inline styles, which is why the app had none of them. Use:
+//   <button className="btn btn--primary">      (see index.css for variants)
+//   <input className="input" />
+// Inline styles beat CSS classes, so don't re-add style={ui.btn} on top.
 export const colors = {
   bg: 'var(--c-bg)',
   panel: 'var(--c-panel)',
@@ -20,22 +26,8 @@ export const ui = {
   sub: { fontSize: 14, color: 'var(--c-muted)', marginBottom: 24 },
   row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   label: { display: 'block', fontSize: 13, color: 'var(--c-sub)', marginBottom: 6 },
-  input: {
-    width: '100%', padding: '10px 14px', borderRadius: 8,
-    border: '1px solid var(--c-border)', background: 'var(--c-input-bg)',
-    color: 'var(--c-text)', fontSize: 14, marginBottom: 16, outline: 'none',
-    boxSizing: 'border-box',
-  },
-  btn: {
-    padding: '10px 18px', borderRadius: 8,
-    background: 'var(--c-btn-bg)',
-    border: 'none', color: 'var(--c-btn-text)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 6px 16px -8px var(--c-accent)',
-  },
-  btnGhost: {
-    padding: '8px 14px', borderRadius: 8, background: 'transparent',
-    border: '1px solid var(--c-border)', color: 'var(--c-sub)', fontSize: 13, cursor: 'pointer',
-  },
+  // Spacing-only helper for stacked form fields; the look comes from .input.
+  fieldGap: { marginBottom: 16 },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: {
     textAlign: 'left', fontSize: 12, color: 'var(--c-muted)',
@@ -53,5 +45,4 @@ export const ui = {
     color: 'var(--c-accent-soft)', border: '1px solid var(--c-accent-border)',
     marginRight: 6, marginBottom: 6,
   },
-  x: { cursor: 'pointer', color: 'var(--c-muted)', fontWeight: 700, lineHeight: 1 },
 }

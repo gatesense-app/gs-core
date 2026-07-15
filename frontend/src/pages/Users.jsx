@@ -59,7 +59,7 @@ export default function Users() {
 
   return (
     <div style={ui.page}>
-      <div style={ui.h1}>Users &amp; Guards</div>
+      <h1 className="page-title">Users &amp; Guards</h1>
       <div style={ui.sub}>Create logins for staff and residents.</div>
 
       <form style={ui.card} onSubmit={create}>
@@ -68,7 +68,7 @@ export default function Users() {
           {isPlatform && (
             <div style={{ width: 180 }}>
               <label style={ui.label}>Society</label>
-              <select style={{ ...ui.input, marginBottom: 0 }} value={form.society_id} onChange={set('society_id')} required>
+              <select className="select" value={form.society_id} onChange={set('society_id')} required>
                 <option value="">Select…</option>
                 {societies.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -76,7 +76,7 @@ export default function Users() {
           )}
           <div style={{ width: 140 }}>
             <label style={ui.label}>Role</label>
-            <select style={{ ...ui.input, marginBottom: 0 }} value={form.role} onChange={set('role')}>
+            <select className="select" value={form.role} onChange={set('role')}>
               <option value="guard">guard</option>
               <option value="resident">resident</option>
               <option value="society_admin">society_admin</option>
@@ -84,17 +84,17 @@ export default function Users() {
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
             <label style={ui.label}>Email</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} type="email" value={form.email} onChange={set('email')} required placeholder="guard4@..." />
+            <input className="input" type="email" value={form.email} onChange={set('email')} required placeholder="guard4@..." />
           </div>
           <div style={{ width: 150 }}>
             <label style={ui.label}>Name</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} value={form.full_name} onChange={set('full_name')} placeholder="Full name" />
+            <input className="input" value={form.full_name} onChange={set('full_name')} placeholder="Full name" />
           </div>
           <div style={{ width: 140 }}>
             <label style={ui.label}>Password</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} type="password" value={form.password} onChange={set('password')} required minLength={6} />
+            <input className="input" type="password" value={form.password} onChange={set('password')} required minLength={6} />
           </div>
-          <button style={ui.btn} disabled={busy}>{busy ? 'Adding…' : 'Add'}</button>
+          <button className="btn btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add'}</button>
         </div>
         {error && <div style={ui.error}>{error}</div>}
       </form>

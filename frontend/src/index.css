@@ -49,3 +49,172 @@ body {
 
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: inherit; }
+
+/* ---------------------------------------------------------------------------
+   Focus.
+   Inputs used to set outline:none with nothing in its place, which left
+   keyboard users with no idea where they were. One ring, everywhere. Navy is
+   the only brand colour readable against BOTH white and turquoise, so it works
+   on every surface. :focus-visible keeps it off mouse clicks.
+--------------------------------------------------------------------------- */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-navy);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons.
+   These live here rather than in inline style objects because :hover,
+   :focus-visible and :disabled cannot be expressed inline — which is why the
+   app had none of them.
+
+   min-height 44px is the Apple HIG touch target; the guard taps this on a phone
+   with a visitor waiting.
+
+   Hover deliberately uses filter: brightness() instead of a new hex, so the
+   palette stays exactly white / navy / turquoise.
+--------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 150ms ease, border-color 150ms ease,
+              color 150ms ease, filter 150ms ease, opacity 150ms ease;
+}
+.btn:hover:not(:disabled) { filter: brightness(0.94); }
+.btn:active:not(:disabled) { filter: brightness(0.88); }
+/* Disabled must not look identical to enabled: a submit runs several seconds
+   while the agents think, and the button used to stay fully saturated and
+   cursor:pointer the whole time. */
+.btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+
+/* One primary per view. Navy on turquoise = 9.6:1. */
+.btn--primary { background: var(--c-btn-bg); color: var(--c-btn-text); }
+
+/* Subordinate: same shape, quieter. */
+.btn--secondary {
+  background: var(--c-panel);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+.btn--secondary:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  background: var(--c-accent-bg);
+  filter: none;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--c-sub);
+  border-color: var(--c-border);
+}
+.btn--ghost:hover:not(:disabled) {
+  color: var(--c-text);
+  border-color: var(--c-accent);
+  filter: none;
+}
+
+/* Decision actions. Semantic, not brand — green/red carry the meaning. */
+.btn--success {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.btn--danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.btn--block { width: 100%; }
+.btn--sm { min-height: 44px; padding: 8px 14px; font-size: 13px; }
+
+/* Remove-affordance inside a chip.
+   A 44px visual button would dwarf the chip, so the *hit area* is extended past
+   the visual bounds instead (the web equivalent of hitSlop): 28px + 8px on each
+   side = 44px tappable. Chip gap is 12px so neighbouring hit areas don't
+   overlap and steal each other's taps. */
+.chip-x {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 150ms ease, background-color 150ms ease;
+}
+.chip-x::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.chip-x:hover { opacity: 1; background: rgba(1, 13, 82, 0.08); }
+
+/* ---------------------------------------------------------------------------
+   Inputs
+--------------------------------------------------------------------------- */
+.input, .select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--c-border);
+  background: var(--c-input-bg);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 150ms ease;
+}
+.input:hover:not(:disabled), .select:hover:not(:disabled) {
+  border-color: var(--c-accent-border);
+}
+.input:focus-visible, .select:focus-visible { border-color: var(--c-accent); }
+.input::placeholder { color: var(--c-muted); }
+.input:disabled, .select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.field { display: block; font-size: 13px; color: var(--c-sub); margin-bottom: 6px; }
+
+/* ---------------------------------------------------------------------------
+   Headings. Real h1/h2 elements — the app had none, so screen readers got no
+   structure to navigate by.
+--------------------------------------------------------------------------- */
+h1, h2, h3 { color: var(--c-text); line-height: 1.25; font-weight: 700; }
+.page-title { font-size: 22px; }
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 14px;
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

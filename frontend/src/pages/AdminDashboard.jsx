@@ -17,12 +17,7 @@ const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' 
 
 const s = {
   page: { padding: '32px 28px' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
-  title: { fontSize: 20, fontWeight: 700, color: 'var(--c-text)' },
-  refresh: {
-    padding: '7px 14px', borderRadius: 7, border: '1px solid var(--c-border)',
-    background: 'transparent', color: 'var(--c-sub)', fontSize: 13,
-  },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, gap: 16 },
   empty: { color: 'var(--c-muted)', textAlign: 'center', marginTop: 80, fontSize: 15 },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { textAlign: 'left', fontSize: 12, color: 'var(--c-muted)', padding: '0 12px 10px', borderBottom: '1px solid var(--c-border)' },
@@ -80,8 +75,8 @@ export default function AdminDashboard() {
   return (
     <div style={s.page}>
       <div style={s.header}>
-        <div style={s.title}>Visitor Sessions</div>
-        <button style={s.refresh} onClick={load}>Refresh</button>
+        <h1 className="page-title">Visitor Sessions</h1>
+        <button className="btn btn--ghost" onClick={load}>Refresh</button>
       </div>
 
       {loading && <div style={s.empty}>Loading...</div>}

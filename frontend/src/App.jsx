@@ -45,7 +45,7 @@ function AppNav() {
       ))}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
         {user && <span style={{ fontSize: 13, color: colors.muted }}>{user.email} · {user.role}</span>}
-        {user && <button onClick={logout} style={{ ...navLink, background: 'none', border: 'none', cursor: 'pointer' }}>Sign out</button>}
+        {user && <button onClick={logout} className="btn btn--ghost btn--sm" style={{ border: 'none' }}>Sign out</button>}
       </div>
     </nav>
   )

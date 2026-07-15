@@ -43,38 +43,22 @@ const s = {
   }),
   who: { fontSize: 10, color: 'var(--c-muted)', textTransform: 'uppercase', marginBottom: 3 },
   replyRow: { display: 'flex', gap: 8, marginTop: 14 },
-  input: {
-    flex: 1, padding: '10px 13px', borderRadius: 8, border: '1px solid var(--c-border)',
-    background: 'var(--c-input-bg)', color: 'var(--c-text)', fontSize: 14, outline: 'none',
-  },
-  btn: {
-    padding: '10px 18px', borderRadius: 8, border: 'none', background: 'var(--c-btn-bg)',
-    color: 'var(--c-btn-text)', fontSize: 14, fontWeight: 700,
-  },
-  quickRow: { display: 'flex', gap: 8, marginTop: 10 },
-  allow: {
-    padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.45)',
-    background: 'rgba(34,197,94,0.12)', color: '#15803d', fontSize: 13, fontWeight: 700,
-  },
-  deny: {
-    padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.45)',
-    background: 'rgba(239,68,68,0.12)', color: '#b91c1c', fontSize: 13, fontWeight: 700,
-  },
+  // Allow/Deny are the decision this whole product exists for, so they lead —
+  // and they're spaced apart, because a mis-tap on Deny turns away a real guest.
+  quickRow: { display: 'flex', gap: 16, marginTop: 14 },
   // rules
   label: { display: 'block', fontSize: 13, color: 'var(--c-sub)', marginBottom: 6 },
-  chips: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  // gap 12 so adjacent .chip-x hit areas (which extend 8px past the visual
+  // bounds) don't overlap and steal each other's taps.
+  chips: { display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 10 },
   chip: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 10px',
+    display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 12, paddingLeft: 10,
     borderRadius: 99, background: 'var(--c-accent-bg)', color: 'var(--c-accent-soft)',
     border: '1px solid var(--c-accent-border)',
   },
-  x: { cursor: 'pointer', fontWeight: 700, lineHeight: 1, opacity: 0.7 },
-  addRow: { display: 'flex', gap: 8, marginBottom: 18 },
-  check: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--c-text)', marginBottom: 10 },
-  time: {
-    padding: '7px 10px', borderRadius: 8, border: '1px solid var(--c-border)',
-    background: 'var(--c-input-bg)', color: 'var(--c-text)', fontSize: 13, outline: 'none',
-  },
+  addRow: { display: 'flex', gap: 8, marginBottom: 18, alignItems: 'stretch' },
+  check: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--c-text)', marginBottom: 12, minHeight: 44, cursor: 'pointer' },
+  checkbox: { width: 18, height: 18, accentColor: 'var(--c-accent)', cursor: 'pointer' },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--c-row-border)' },
   muted: { fontSize: 13, color: 'var(--c-muted)' },
   saved: { fontSize: 12, color: 'var(--c-ok)', marginLeft: 10 },
@@ -178,20 +162,20 @@ export default function Portal() {
 
   return (
     <div style={s.page}>
-      <div style={s.h1}>Hi{me?.name ? `, ${me.name.split(' ')[0]}` : ''}</div>
+      <h1 className="page-title">Hi{me?.name ? `, ${me.name.split(' ')[0]}` : ''}</h1>
       <div style={s.flat}>{me ? `Flat ${me.flat_number}` : ''}</div>
-      {error && <div style={s.err}>{error}</div>}
+      {error && <div style={s.err} role="alert">{error}</div>}
 
       {/* Visitors waiting on this resident */}
       {awaiting.length === 0 && (
-        <div style={s.card}>
-          <div style={s.sectionTitle}>At your gate</div>
+        <section style={s.card}>
+          <h2 className="section-title">At your gate</h2>
           <div style={s.muted}>No one is waiting right now. You&apos;ll see visitors here the moment they arrive.</div>
-        </div>
+        </section>
       )}
       {awaiting.map(sess => (
-        <div key={sess.session_id} style={s.liveCard}>
-          <div style={s.sectionTitle}>Waiting at your gate</div>
+        <section key={sess.session_id} style={s.liveCard}>
+          <h2 className="section-title">Waiting at your gate</h2>
           <div style={s.visitor}>{sess.visitor_name}</div>
           <div style={s.purpose}>{sess.purpose} — {sess.purpose_detail}</div>
 
@@ -206,69 +190,78 @@ export default function Portal() {
 
           <form onSubmit={e => { e.preventDefault(); send(sess.session_id, reply[sess.session_id] || '') }} style={s.replyRow}>
             <input
-              style={s.input}
+              className="input"
+              style={{ flex: 1 }}
+              aria-label={`Reply about ${sess.visitor_name}, or ask a question`}
               value={reply[sess.session_id] || ''}
               onChange={e => setReply(r => ({ ...r, [sess.session_id]: e.target.value }))}
               placeholder="Reply, or ask a question..."
             />
-            <button style={s.btn}>Send</button>
+            {/* Secondary: the decision below is the primary action here. */}
+            <button className="btn btn--secondary">Send</button>
           </form>
           <div style={s.quickRow}>
-            <button style={s.allow} onClick={() => send(sess.session_id, 'ALLOW')}>Allow</button>
-            <button style={s.deny} onClick={() => send(sess.session_id, 'DENY')}>Deny</button>
+            <button className="btn btn--success" onClick={() => send(sess.session_id, 'ALLOW')}>Allow</button>
+            <button className="btn btn--danger" onClick={() => send(sess.session_id, 'DENY')}>Deny</button>
           </div>
-        </div>
+        </section>
       ))}
 
       {/* Standing rules */}
-      <div style={s.card}>
-        <div style={s.sectionTitle}>Standing rules</div>
+      <section style={s.card}>
+        <h2 className="section-title">Standing rules</h2>
 
-        <label style={s.label}>Always allow these visitors</label>
+        <label style={s.label} htmlFor="rule-add">Always allow these visitors</label>
         <div style={s.chips}>
           {form.alwaysAllow.length === 0 && <span style={s.muted}>None yet</span>}
           {form.alwaysAllow.map(r => (
             <span key={r} style={s.chip}>
               {r}
-              <span
-                style={s.x}
-                role="button"
-                tabIndex={0}
+              {/* A real button: as a <span role="button"> this could be focused
+                  but never activated with Enter/Space. */}
+              <button
+                type="button"
+                className="chip-x"
                 aria-label={`Remove ${r}`}
                 onClick={() => setForm(f => ({ ...f, alwaysAllow: f.alwaysAllow.filter(x => x !== r) }))}
-              >×</span>
+              >×</button>
             </span>
           ))}
         </div>
         <div style={s.addRow}>
           <input
-            style={s.input}
+            id="rule-add"
+            className="input"
+            style={{ flex: 1 }}
             value={newRule}
             onChange={e => setNewRule(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addRule() } }}
             placeholder="e.g. Swiggy"
           />
-          <button type="button" style={s.btn} onClick={addRule}>Add</button>
+          <button type="button" className="btn btn--secondary" onClick={addRule}>Add</button>
         </div>
 
-        <label style={s.label}>Never allow visitors after</label>
+        <label style={s.label} htmlFor="rule-after">Never allow visitors after</label>
         <div style={s.addRow}>
           <input
+            id="rule-after"
             type="time"
-            style={s.time}
+            className="input"
+            style={{ width: 'auto' }}
             value={form.neverAfter}
             onChange={e => setForm(f => ({ ...f, neverAfter: e.target.value }))}
           />
           {form.neverAfter && (
-            <button type="button" style={{ ...s.btn, background: 'transparent', color: 'var(--c-sub)', border: '1px solid var(--c-border)' }}
+            <button type="button" className="btn btn--ghost"
               onClick={() => setForm(f => ({ ...f, neverAfter: '' }))}>Clear</button>
           )}
         </div>
 
-        <div style={s.sectionTitle}>Deliveries</div>
+        <h2 className="section-title">Deliveries</h2>
         <label style={s.check}>
           <input
             type="checkbox"
+            style={s.checkbox}
             checked={!!prefs.auto_log_daytime}
             onChange={e => setPrefs(p => ({ ...p, auto_log_daytime: e.target.checked }))}
           />
@@ -277,23 +270,25 @@ export default function Portal() {
         <label style={s.check}>
           <input
             type="checkbox"
+            style={s.checkbox}
             checked={!!prefs.notify_after_hours}
             onChange={e => setPrefs(p => ({ ...p, notify_after_hours: e.target.checked }))}
           />
           Always ask me about after-hours deliveries
         </label>
 
-        <div style={{ marginTop: 16 }}>
-          <button style={s.btn} onClick={saveRules} disabled={saving}>
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center' }}>
+          <button className="btn btn--primary" onClick={saveRules} disabled={saving}>
             {saving ? 'Saving...' : 'Save rules'}
           </button>
-          {saved && <span style={s.saved}>Saved</span>}
+          {/* aria-live so a screen reader hears the confirmation too. */}
+          <span style={s.saved} role="status">{saved ? 'Saved' : ''}</span>
         </div>
-      </div>
+      </section>
 
       {/* Recent visitors */}
-      <div style={s.card}>
-        <div style={s.sectionTitle}>Recent visitors</div>
+      <section style={s.card}>
+        <h2 className="section-title">Recent visitors</h2>
         {recent.length === 0 && <div style={s.muted}>No visitors yet.</div>}
         {recent.map(sess => (
           <div key={sess.session_id} style={s.row}>
@@ -304,7 +299,7 @@ export default function Portal() {
             <span style={s.badge(sess.status)}>{sess.status}</span>
           </div>
         ))}
-      </div>
+      </section>
     </div>
   )
 }

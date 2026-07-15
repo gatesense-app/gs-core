@@ -28,25 +28,33 @@ function RulesEditor({ initial, onSave, onCancel, busy }) {
         {rules.map((r, i) => (
           <span key={i} style={ui.chip}>
             {ruleLabel(r)}
-            <span style={ui.x} onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}>×</span>
+            {/* Real button: as a bare <span onClick> this was unreachable by
+                keyboard entirely — no focus, no Enter. */}
+            <button
+              type="button"
+              className="chip-x"
+              aria-label={`Remove rule: ${ruleLabel(r)}`}
+              onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))}
+            >×</button>
           </span>
         ))}
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-        <select style={{ ...ui.input, marginBottom: 0, width: 170 }} value={type} onChange={(e) => setType(e.target.value)}>
+        <select className="select" style={{ width: 170 }} value={type} onChange={(e) => setType(e.target.value)}>
           <option value="always_allow">Always allow</option>
           <option value="never_allow">Never allow after</option>
         </select>
         <input
-          style={{ ...ui.input, marginBottom: 0, flex: 1 }}
+          className="input"
+          style={{ flex: 1 }}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={type === 'always_allow' ? 'e.g. Swiggy' : 'e.g. 21:00'}
         />
-        <button type="button" style={ui.btnGhost} onClick={add}>Add</button>
+        <button type="button" className="btn btn--ghost" onClick={add}>Add</button>
       </div>
-      <button style={ui.btn} disabled={busy} onClick={() => onSave(rules)}>{busy ? 'Saving…' : 'Save rules'}</button>
-      <button type="button" style={{ ...ui.btnGhost, marginLeft: 8 }} onClick={onCancel}>Cancel</button>
+      <button className="btn btn--primary" disabled={busy} onClick={() => onSave(rules)}>{busy ? 'Saving…' : 'Save rules'}</button>
+      <button type="button" className="btn btn--ghost" style={{ marginLeft: 8 }} onClick={onCancel}>Cancel</button>
     </div>
   )
 }
@@ -110,7 +118,7 @@ export default function Residents() {
 
   return (
     <div style={ui.page}>
-      <div style={ui.h1}>Residents</div>
+      <h1 className="page-title">Residents</h1>
       <div style={ui.sub}>{rows.length} residents. Manage flats and standing rules.</div>
 
       <form style={ui.card} onSubmit={create}>
@@ -119,7 +127,7 @@ export default function Residents() {
           {isPlatform && (
             <div style={{ width: 200 }}>
               <label style={ui.label}>Society</label>
-              <select style={{ ...ui.input, marginBottom: 0 }} value={form.society_id} onChange={set('society_id')} required>
+              <select className="select" value={form.society_id} onChange={set('society_id')} required>
                 <option value="">Select…</option>
                 {societies.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -127,17 +135,17 @@ export default function Residents() {
           )}
           <div style={{ width: 120 }}>
             <label style={ui.label}>Flat</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} value={form.flat_number} onChange={set('flat_number')} required placeholder="A-101" />
+            <input className="input" value={form.flat_number} onChange={set('flat_number')} required placeholder="A-101" />
           </div>
           <div style={{ flex: 1, minWidth: 160 }}>
             <label style={ui.label}>Name</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} value={form.name} onChange={set('name')} required placeholder="Priya Sharma" />
+            <input className="input" value={form.name} onChange={set('name')} required placeholder="Priya Sharma" />
           </div>
           <div style={{ width: 160 }}>
             <label style={ui.label}>Phone</label>
-            <input style={{ ...ui.input, marginBottom: 0 }} value={form.phone} onChange={set('phone')} placeholder="+91…" />
+            <input className="input" value={form.phone} onChange={set('phone')} placeholder="+91…" />
           </div>
-          <button style={ui.btn} disabled={busy}>{busy ? 'Adding…' : 'Add'}</button>
+          <button className="btn btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add'}</button>
         </div>
         {error && <div style={ui.error}>{error}</div>}
       </form>
@@ -168,7 +176,7 @@ export default function Residents() {
               </td>
               <td style={ui.td}>
                 {editing !== r.id && (
-                  <button style={ui.btnGhost} onClick={() => setEditing(r.id)}>Edit rules</button>
+                  <button className="btn btn--ghost" onClick={() => setEditing(r.id)}>Edit rules</button>
                 )}
               </td>
             </tr>

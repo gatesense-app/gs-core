@@ -18,7 +18,6 @@ const s = {
   kv: { marginBottom: 16 },
   key: { fontSize: 11, color: 'var(--c-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 },
   val: { fontSize: 15, color: 'var(--c-text)', fontWeight: 500 },
-  sectionTitle: { fontSize: 13, fontWeight: 600, color: 'var(--c-sub)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 },
   badge: (status) => ({
     display: 'inline-block', padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 500,
     background: STATUS_COLOR[status] + '22', color: STATUS_COLOR[status],
@@ -62,17 +61,8 @@ const s = {
   }),
   none: { fontSize: 13, color: 'var(--c-muted)' },
 
-  // Reply box
+  // Reply box (look comes from .input / .btn in index.css)
   replyBox: { display: 'flex', gap: 10, marginTop: 16 },
-  replyInput: {
-    flex: 1, padding: '10px 14px', borderRadius: 8,
-    border: '1px solid var(--c-border)', background: 'var(--c-input-bg)',
-    color: 'var(--c-text)', fontSize: 14, outline: 'none',
-  },
-  replyBtn: {
-    padding: '10px 20px', borderRadius: 8, border: 'none',
-    background: 'var(--c-btn-bg)', color: 'var(--c-btn-text)', fontSize: 14, fontWeight: 700,
-  },
 
   // Conversation
   convItem: (speaker) => ({
@@ -185,7 +175,7 @@ export default function SessionDetail() {
 
       {/* Decision trace timeline */}
       <div style={s.card}>
-        <div style={s.sectionTitle}>Decision Trace</div>
+        <h2 className="section-title">Decision Trace</h2>
         {session.decision_trace.length === 0 && (
           <div style={{ color: 'var(--c-muted)', fontSize: 13 }}>No trace entries yet.</div>
         )}
@@ -214,7 +204,7 @@ export default function SessionDetail() {
         <>
           {audit.escalations.length > 0 && (
             <div style={s.card}>
-              <div style={s.sectionTitle}>Escalations</div>
+              <h2 className="section-title">Escalations</h2>
               {audit.escalations.map(e => (
                 <div key={e.id} style={s.auditRow}>
                   <div>
@@ -228,7 +218,7 @@ export default function SessionDetail() {
           )}
 
           <div style={s.card}>
-            <div style={s.sectionTitle}>Notifications</div>
+            <h2 className="section-title">Notifications</h2>
             {audit.notifications.length === 0 && <div style={s.none}>No notifications sent.</div>}
             {audit.notifications.map(n => (
               <div key={n.id} style={s.auditRow}>
@@ -248,7 +238,7 @@ export default function SessionDetail() {
       {/* Conversation (intercom sessions) */}
       {session.conversation_history.length > 0 && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>Conversation</div>
+          <h2 className="section-title">Conversation</h2>
           {session.conversation_history.map((turn, i) => (
             <div key={i} style={s.convItem(turn.speaker)}>
               <div>
@@ -263,19 +253,21 @@ export default function SessionDetail() {
       {/* Resident reply input */}
       {session.status === 'awaiting_resident' && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>Resident Reply</div>
+          <h2 className="section-title">Resident Reply</h2>
           <div style={{ fontSize: 13, color: 'var(--c-sub)', marginBottom: 12 }}>
             Simulate the resident's response (or guard clarification if prompted)
           </div>
           <form onSubmit={sendReply} style={s.replyBox}>
             <input
-              style={s.replyInput}
+              className="input"
+              style={{ flex: 1 }}
+              aria-label="Reply as the resident: ALLOW, DENY, or a question"
               value={reply}
               onChange={e => setReply(e.target.value)}
               placeholder="Type ALLOW, DENY, or a question..."
             />
-            <button style={s.replyBtn} disabled={sending}>
-              {sending ? '...' : 'Send'}
+            <button className="btn btn--primary" disabled={sending}>
+              {sending ? 'Sending...' : 'Send'}
             </button>
           </form>
         </div>
