@@ -31,7 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from backend import db_models as m
 from backend import errors
-from backend.config import CORS_ORIGINS
+from backend.config import CORS_ORIGINS, TIMEOUT_SWEEPER_ENABLED
 from backend.deps import (
     CurrentUser,
     get_db,
@@ -45,6 +45,7 @@ from backend.realtime import manager
 from backend.routers import admin, auth, portal, residents, societies, users, visitors
 from backend.routers.common import parse_uuid
 from backend.security import decode_access_token
+from backend.timeouts import run_sweeper
 
 
 @asynccontextmanager
@@ -52,7 +53,18 @@ async def lifespan(app: FastAPI):
     # Capture the running loop so sync request handlers can push WebSocket
     # updates via manager.publish() (see backend/realtime.py).
     manager.bind_loop(asyncio.get_running_loop())
-    yield
+
+    # Escalate visitors left waiting on a silent resident (backend/timeouts.py).
+    sweeper = asyncio.create_task(run_sweeper()) if TIMEOUT_SWEEPER_ENABLED else None
+    try:
+        yield
+    finally:
+        if sweeper is not None:
+            sweeper.cancel()
+            try:
+                await sweeper
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="GateSense", version="0.1.0", lifespan=lifespan)

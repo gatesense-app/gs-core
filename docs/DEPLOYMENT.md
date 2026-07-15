@@ -50,6 +50,7 @@ default user must be able to `CREATE ROLE` — the managed Postgres user can.
    | `CORS_ORIGINS` | `https://gatesense.in,https://www.gatesense.in` (add the Vercel preview URL while testing) |
    | `ANTHROPIC_MODEL` | *(optional)* defaults to `claude-sonnet-5` |
    | `LLM_TIMEOUT_SECONDS` | *(optional)* defaults to `45` |
+   | `RESIDENT_TIMEOUT_MINUTES` | *(optional)* defaults to `10` — how long a visitor waits on a silent resident before escalating to their backup contact |
 
    Do **not** set `ANTHROPIC_SSL_VERIFY`. It disables TLS verification and exists
    only for local dev behind an intercepting proxy.
@@ -66,6 +67,17 @@ default user must be able to `CREATE ROLE` — the managed Postgres user can.
 > **Rate limits are per-process.** The limiter holds buckets in memory, so with
 > more than one replica each process allows the full limit. Keep the backend at
 > one instance, or move the buckets to Redis first (`backend/ratelimit.py`).
+
+> **The timeout sweeper runs in the API process** (`backend/timeouts.py`). With
+> multiple replicas each would sweep, so a session could be escalated twice.
+> The sweep is idempotent on status (only `awaiting_resident` is eligible), but
+> take a lock — or move it to a single worker — before scaling out.
+> `TIMEOUT_SWEEPER_ENABLED=0` disables it.
+
+LangGraph creates its own `checkpoints*` tables on first boot (see
+`backend/checkpointer.py`). They hold in-flight conversation state, are keyed by
+session id, and — unlike the application tables — are **not** under RLS. Include
+them in backups; a lost checkpoint strands any conversation in flight.
 
 ## 3. Vercel — SPA
 

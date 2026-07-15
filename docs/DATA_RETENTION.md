@@ -18,6 +18,7 @@ which of those rules are **not yet enforced in code**.
 | Notification delivery records | `notification_delivery_log` | Links resident ↔ session |
 | Escalations | `escalations` | Yes |
 | Login email, bcrypt hash, role | `users` | Yes |
+| In-flight intercom graph state | `checkpoints*` (LangGraph-owned) | Yes — mirrors the conversation |
 
 **No photos.** The PRD contemplated visitor photo capture; it is not built, and
 nothing in the schema stores images. Adding it would need its own retention and
@@ -47,6 +48,7 @@ comes from the request's JWT.
 | `conversation_log`, `conversation_history` | **90 days** | Same lifecycle as its session |
 | `notification_delivery_log` | **30 days** | Operational health only |
 | `escalations` | **1 year** | Security-relevant; reviewed by the committee |
+| `checkpoints*` | Until the session resolves; purge with its session | Only needed while a conversation is in flight |
 | `visitors` aggregates | **1 year** after last visit | Powers "known visitor" |
 | `residents`, `users` | Life of the tenancy; delete ≤30 days after a society leaves | |
 
@@ -68,5 +70,12 @@ export/erasure endpoint, and gate signage disclosing that entries are logged.
 
 `DELETE FROM societies WHERE id = …` cascades to residents, users, visitors,
 sessions, conversations, escalations, and notifications — the tenant's data is
-removed in one step. Verify backups are also aged out per the schedule above,
-or the deletion is only partial.
+removed in one step.
+
+Two caveats, stated rather than hidden:
+
+- **LangGraph's `checkpoints*` tables do not cascade.** They are keyed by session
+  id with no foreign key to `societies`, so deleting a society leaves any
+  in-flight conversation state behind. A purge job must clear checkpoints for
+  the deleted sessions too.
+- Backups must age out per the schedule above, or the deletion is only partial.

@@ -48,6 +48,13 @@ LangGraph graph, because it must *pause* after messaging the resident and resume
 minutes later when they reply, possibly looping through clarifications first.
 That pause is `interrupt()`; the raw loop has no way to express it.
 
+That pause is checkpointed to **Postgres**, so a deploy or crash mid-conversation
+doesn't strand a visitor at the gate — a restarted process resumes exactly where
+it left off. And if the resident simply never replies, a sweeper escalates the
+session to their backup contact (or the guard) rather than leaving it open
+forever; because it reads timestamps from the database rather than holding
+in-process timers, timeouts that came due during a restart are still honoured.
+
 Every agent's tools are backed by Postgres and scoped to the caller's society —
 the model never sees another tenant's data, and never chooses which tenant it
 is acting for (that comes from the request's JWT, not the model).
@@ -84,6 +91,8 @@ because something broke:
 | Gate or Intercom agent | `escalated` to the guard's default policy + an escalation row |
 | Delivery agent | routed to the resident — an unscreened delivery is never cleared |
 | A resident's reply can't be parsed | session stays open; never resolved on a guess |
+| The resident never replies | escalated to their backup contact, else the guard (`RESIDENT_TIMEOUT_MINUTES`, default 10) |
+| The backend restarts mid-conversation | the graph resumes from its Postgres checkpoint |
 
 The visitor record survives the failure too: fallbacks run *inside* the request's
 transaction, so a crash can't roll back the record of someone standing at the
@@ -167,6 +176,8 @@ backend/
   pipeline.py  chains the agents; owns the fail-toward-human fallbacks
   deps.py      scoped_session (RLS), auth, role + resident gates
   realtime.py  WebSocket fan-out (per society; per flat for residents)
+  checkpointer.py  durable intercom state (Postgres) — survives restarts
+  timeouts.py  sweeper: escalates visitors left waiting on a silent resident
   eval/        hand-labeled scenarios + scorer
 frontend/src/
   pages/       Landing, Login, Kiosk, Dashboard, SessionDetail, Portal, admin CRUD

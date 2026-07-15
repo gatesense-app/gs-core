@@ -37,8 +37,14 @@ def send_notification(ctx: IntercomContext, flat_number: str, resident_name: str
     Deliver a message to the resident and record it. No real SMS is sent yet;
     we log an in-app notification so the delivery is auditable (RLS-scoped).
     """
+    # Filter on society_id explicitly rather than leaning on RLS: the timeout
+    # sweeper calls these tools with a system (RLS-bypassed) session, where a
+    # flat_number alone matches that flat in *every* society.
     resident = ctx.db.execute(
-        select(m.Resident).where(m.Resident.flat_number == flat_number)
+        select(m.Resident).where(
+            m.Resident.society_id == ctx.society_id,
+            m.Resident.flat_number == flat_number,
+        )
     ).scalars().first()
 
     log = m.NotificationDeliveryLog(
@@ -89,17 +95,26 @@ def escalate_to_backup_contact(ctx: IntercomContext, reason: str) -> dict:
     row = ctx.db.get(m.VisitorSession, ctx.session_uuid)
     backup = None
     if row is not None:
+        # society_id is explicit here for the same reason as send_notification:
+        # the sweeper runs without RLS, so flat_number alone is ambiguous across
+        # societies and could resolve a neighbouring tenant's resident.
         resident = ctx.db.execute(
-            select(m.Resident).where(m.Resident.flat_number == row.flat_number)
+            select(m.Resident).where(
+                m.Resident.society_id == ctx.society_id,
+                m.Resident.flat_number == row.flat_number,
+            )
         ).scalars().first()
         if resident is not None and resident.backup_contact_id is not None:
             backup = ctx.db.get(m.Resident, resident.backup_contact_id)
 
+    # Record where it actually went: with no backup contact configured, the
+    # fallback is the guard's default policy, and saying "backup_contact"
+    # would misreport the audit trail.
     escalation = m.Escalation(
         society_id=ctx.society_id,
         session_id=ctx.session_uuid,
         reason=reason,
-        escalated_to="backup_contact",
+        escalated_to="backup_contact" if backup is not None else "guard_default",
         status="open",
     )
     ctx.db.add(escalation)
@@ -116,7 +131,7 @@ def escalate_to_backup_contact(ctx: IntercomContext, reason: str) -> dict:
     return {
         "escalated": True,
         "session_id": str(ctx.session_uuid),
-        "escalated_to": "backup_contact",
+        "escalated_to": escalation.escalated_to,
         "backup_notified": backup is not None,
         "reason": reason,
     }

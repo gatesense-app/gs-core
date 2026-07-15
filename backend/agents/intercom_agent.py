@@ -29,8 +29,9 @@ from typing import Literal
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, Command
+
+from backend.checkpointer import get_checkpointer
 
 from backend.tools.intercom_tools import (
     send_notification,
@@ -301,14 +302,24 @@ def build_intercom_graph():
     builder.add_edge("resolve", END)
     builder.add_edge("escalate", END)
 
-    # MemorySaver: checkpoints state in memory so interrupt() can pause/resume.
-    # Swap with SqliteSaver("sessions.db") or PostgresSaver for persistence.
-    checkpointer = MemorySaver()
-    return builder.compile(checkpointer=checkpointer)
+    # The checkpointer is what makes interrupt() survive the gap between the
+    # notification and the resident's reply — which is a different HTTP request,
+    # and possibly a different process after a deploy. Postgres-backed; see
+    # backend/checkpointer.py.
+    return builder.compile(checkpointer=get_checkpointer())
 
 
-# Module-level graph instance (shared across calls)
-graph = build_intercom_graph()
+# Built on first use, not at import: compiling opens the checkpointer's DB pool,
+# and importing this module (tests, tooling, `--help`) shouldn't require a
+# reachable database.
+_graph = None
+
+
+def get_graph():
+    global _graph
+    if _graph is None:
+        _graph = build_intercom_graph()
+    return _graph
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +362,7 @@ def start_intercom_session(
 
     # Run until the first interrupt
     final_state = None
-    for event in graph.stream(initial_state, config=_config(ctx), stream_mode="values"):
+    for event in get_graph().stream(initial_state, config=_config(ctx), stream_mode="values"):
         final_state = event
 
     return {
@@ -369,7 +380,7 @@ def submit_reply(ctx, reply: str) -> dict:
     Returns the current state — check ["done"] to know if it's resolved.
     """
     final_state = None
-    for event in graph.stream(
+    for event in get_graph().stream(
         Command(resume=reply), config=_config(ctx), stream_mode="values"
     ):
         final_state = event

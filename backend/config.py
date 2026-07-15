@@ -42,6 +42,18 @@ RATE_LIMIT_SESSIONS = int(os.getenv("RATE_LIMIT_SESSIONS", "30"))  # visitor ent
 RATE_LIMIT_REPLIES = int(os.getenv("RATE_LIMIT_REPLIES", "60"))    # replies / window
 
 # ---------------------------------------------------------------------------
+# Resident reply timeout -> escalation (backend/timeouts.py)
+# ---------------------------------------------------------------------------
+# How long a visitor may wait on a silent resident before the session escalates
+# to the backup contact (or the guard's default policy if no backup is set).
+RESIDENT_TIMEOUT_MINUTES = int(os.getenv("RESIDENT_TIMEOUT_MINUTES", "10"))
+TIMEOUT_SWEEP_SECONDS = float(os.getenv("TIMEOUT_SWEEP_SECONDS", "60"))
+# The sweeper runs in the API process; disable it for tests/one-off scripts.
+TIMEOUT_SWEEPER_ENABLED = os.getenv("TIMEOUT_SWEEPER_ENABLED", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+
+# ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
 # Default targets the local docker-compose Postgres, which is published on 55432
