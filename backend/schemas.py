@@ -80,6 +80,25 @@ class ResidentResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Resident portal (self-service — always scoped to the caller's own flat)
+# ---------------------------------------------------------------------------
+class PortalMeResponse(BaseModel):
+    resident_id: str
+    flat_number: str
+    name: str
+    phone: Optional[str] = None
+    standing_rules: list[dict[str, Any]] = Field(default_factory=list)
+    delivery_preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+class PortalRulesUpdate(BaseModel):
+    """A resident may edit only their own rules/preferences — never their flat."""
+
+    standing_rules: Optional[list[dict[str, Any]]] = None
+    delivery_preferences: Optional[dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
 # Users (guards / residents / society admins)
 # ---------------------------------------------------------------------------
 class UserCreate(BaseModel):

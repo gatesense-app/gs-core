@@ -13,6 +13,7 @@ Two session flavours:
       user by email before we know their society), seeding, bootstrap.
 """
 
+import uuid
 from contextlib import contextmanager
 
 import jwt
@@ -20,6 +21,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 
+from backend import db_models as m
 from backend.config import APP_DB_ROLE
 from backend.db import SessionLocal
 from backend.security import decode_access_token
@@ -114,3 +116,38 @@ def require_role(*roles: str):
         return user
 
     return _dep
+
+
+def resolve_resident_for_user(db, user: CurrentUser):
+    """
+    The Resident row behind a user (users.resident_id -> residents), or None.
+
+    Resolved by lookup rather than a JWT claim, so re-linking a user takes effect
+    immediately and no token migration is needed. `db` is RLS-scoped to the
+    caller's society, so this can only ever reach their own society's rows.
+
+    Used both by the resident-only gate below and by mixed-role endpoints that
+    must narrow a resident to their own flat (see main.submit_reply).
+    """
+    row = db.get(m.User, uuid.UUID(user.user_id))
+    if row is None or row.resident_id is None:
+        return None
+    return db.get(m.Resident, row.resident_id)
+
+
+def get_current_resident(
+    user: CurrentUser = Depends(require_role("resident")),
+    db=Depends(get_db),
+):
+    """
+    The Resident row behind a `resident` user. RLS scopes to the society, but a
+    resident must only ever see their own flat — so every resident-facing query
+    narrows on this row's flat_number.
+    """
+    resident = resolve_resident_for_user(db, user)
+    if resident is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This resident account is not linked to a flat",
+        )
+    return resident

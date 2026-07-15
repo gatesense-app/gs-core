@@ -11,6 +11,7 @@ import Users from './pages/Users'
 import AdminDashboard from './pages/AdminDashboard'
 import GuardKiosk from './pages/GuardKiosk'
 import SessionDetail from './pages/SessionDetail'
+import Portal from './pages/Portal'
 
 const navBar = {
   display: 'flex', alignItems: 'center', gap: 22,
@@ -65,15 +66,6 @@ function RoleHome() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
   return <Navigate to={ROLE_HOME[user.role] || '/login'} replace />
-}
-
-function Portal() {
-  return (
-    <div style={{ maxWidth: 600, margin: '80px auto', textAlign: 'center', color: colors.sub, padding: '0 20px' }}>
-      <div style={{ fontSize: 22, fontWeight: 600, color: colors.text, marginBottom: 8 }}>Resident portal</div>
-      Your intercom chat and standing-rule controls arrive in a later phase.
-    </div>
-  )
 }
 
 export default function App() {

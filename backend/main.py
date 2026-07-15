@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -29,10 +30,16 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from backend import db_models as m
-from backend.deps import CurrentUser, get_db, require_role
+from backend.deps import (
+    CurrentUser,
+    get_db,
+    require_role,
+    resolve_resident_for_user,
+    scoped_session,
+)
 from backend.pipeline import handle_resident_reply, handle_visitor_entry, serialize
 from backend.realtime import manager
-from backend.routers import auth, residents, societies, users, visitors
+from backend.routers import auth, portal, residents, societies, users, visitors
 from backend.routers.common import parse_uuid
 from backend.security import decode_access_token
 
@@ -60,6 +67,7 @@ app.include_router(societies.router)
 app.include_router(residents.router)
 app.include_router(users.router)
 app.include_router(visitors.router)
+app.include_router(portal.router)  # resident self-service (Phase 5)
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +89,25 @@ class ReplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Role gates for the visitor pipeline. society_id always comes from the JWT.
 _kiosk = require_role("guard", "society_admin")           # who can submit visitors
-_viewer = require_role("guard", "society_admin", "platform_admin")  # who can read
+_viewer = require_role("guard", "society_admin", "platform_admin")  # society-wide read
 _replier = require_role("guard", "society_admin", "resident")       # who can reply
+# Residents may read a single session, but only for their own flat (see _assert_flat_access).
+_session_reader = require_role("guard", "society_admin", "platform_admin", "resident")
+
+
+def _assert_flat_access(db, user: CurrentUser, row: m.VisitorSession) -> None:
+    """
+    RLS scopes to the society; this narrows a resident to their own flat.
+
+    Without it, any resident could read or answer a neighbour's visitor. Raises
+    404 rather than 403 so we don't confirm the session exists to someone who
+    isn't allowed to know.
+    """
+    if user.role != "resident":
+        return
+    resident = resolve_resident_for_user(db, user)
+    if resident is None or resident.flat_number != row.flat_number:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @app.post("/sessions", status_code=201)
@@ -106,6 +131,7 @@ def submit_reply(session_id: str, body: ReplyRequest, user: CurrentUser = Depend
     row = db.get(m.VisitorSession, parse_uuid(session_id))
     if row is None:  # RLS hides other societies' sessions -> looks like 404
         raise HTTPException(status_code=404, detail="Session not found")
+    _assert_flat_access(db, user, row)  # a resident may only answer their own flat
     if row.status != "awaiting_resident":
         raise HTTPException(status_code=400, detail=f"Session is not awaiting a reply (status={row.status})")
     data = serialize(handle_resident_reply(db, row, body.reply))
@@ -114,11 +140,12 @@ def submit_reply(session_id: str, body: ReplyRequest, user: CurrentUser = Depend
 
 
 @app.get("/sessions/{session_id}")
-def get_session(session_id: str, user: CurrentUser = Depends(_viewer), db=Depends(get_db)):
-    """Fetch a single session with its full decision_trace."""
+def get_session(session_id: str, user: CurrentUser = Depends(_session_reader), db=Depends(get_db)):
+    """Fetch a single session with its full decision_trace (residents: own flat only)."""
     row = db.get(m.VisitorSession, parse_uuid(session_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    _assert_flat_access(db, user, row)
     return serialize(row)
 
 
@@ -131,11 +158,19 @@ def list_sessions(user: CurrentUser = Depends(_viewer), db=Depends(get_db)):
     return [serialize(r) for r in rows]
 
 
+def _resident_flat(user_id: str, society_id: str) -> str | None:
+    """Blocking lookup of a resident's flat — run off the event loop."""
+    with scoped_session(society_id) as db:
+        resident = resolve_resident_for_user(db, CurrentUser(user_id, society_id, "resident"))
+        return resident.flat_number if resident else None
+
+
 # ---------------------------------------------------------------------------
-# WebSocket: live session updates for the dashboard / session detail views.
+# WebSocket: live session updates for the dashboard / session detail / portal.
 # Browsers can't send Authorization headers on a WebSocket, so the JWT is
-# passed as a query param (?token=...). Connections are bucketed by society;
-# platform_admins (no society_id) receive every society's events.
+# passed as a query param (?token=...). Staff are bucketed by society,
+# platform_admins receive every society, and residents are bucketed by flat so
+# they only ever hear about their own visitors.
 # ---------------------------------------------------------------------------
 @app.websocket("/ws/sessions")
 async def ws_sessions(ws: WebSocket, token: str | None = Query(default=None)):
@@ -147,16 +182,25 @@ async def ws_sessions(ws: WebSocket, token: str | None = Query(default=None)):
     except jwt.PyJWTError:
         await ws.close(code=1008)
         return
-    if claims.get("role") not in ("guard", "society_admin", "platform_admin"):
+    role = claims.get("role")
+    if role not in ("guard", "society_admin", "platform_admin", "resident"):
         await ws.close(code=1008)
         return
 
     society_id = claims.get("sid")
-    await manager.connect(ws, society_id)
+    flat_number = None
+    if role == "resident":
+        # A resident with no linked flat has nothing to subscribe to.
+        flat_number = await run_in_threadpool(_resident_flat, claims["sub"], society_id)
+        if not flat_number:
+            await ws.close(code=1008)
+            return
+
+    await manager.connect(ws, society_id, flat_number)
     try:
         while True:
             await ws.receive_text()  # client sends nothing meaningful; keep-alive
     except WebSocketDisconnect:
-        manager.disconnect(ws, society_id)
+        manager.disconnect(ws, society_id, flat_number)
     except Exception:
-        manager.disconnect(ws, society_id)
+        manager.disconnect(ws, society_id, flat_number)
