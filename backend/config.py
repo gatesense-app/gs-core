@@ -7,6 +7,15 @@ instead of duplicated across the three agent modules.
 
 import os
 
+from dotenv import load_dotenv
+
+# Load .env here, before any os.getenv() below, so a local .env is the single
+# source of truth for every entry point that imports this module (the API, the
+# test suite, and alembic via migrations/env.py). load_dotenv does NOT override
+# variables already set in the real environment, so precedence stays:
+#   real env (Docker / Railway / CI)  >  .env  >  the defaults below.
+load_dotenv()
+
 # Current-generation Sonnet — good balance of reasoning and cost for the
 # classification / short-drafting workloads these agents run. Override with the
 # ANTHROPIC_MODEL env var (e.g. `claude-opus-4-8`) for higher-stakes reasoning.
@@ -21,9 +30,12 @@ MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+# Default targets the local docker-compose Postgres, which is published on 55432
+# to avoid clashing with a locally-installed Postgres on 5432. In Docker/Railway
+# DATABASE_URL is always set explicitly and wins over this.
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://gatesense:gatesense@localhost:5432/gatesense",
+    "postgresql://gatesense:gatesense@localhost:55432/gatesense",
 )
 
 # Non-superuser role the app SET ROLEs into so Postgres RLS is actually
