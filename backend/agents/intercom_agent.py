@@ -25,13 +25,9 @@ KEY CONCEPTS introduced here:
   - thread_id in config: identifies which session is being resumed
 """
 
-import json
-import httpx
 from typing import Literal
 from typing_extensions import TypedDict
 
-import anthropic
-from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, Command
@@ -43,6 +39,7 @@ from backend.tools.intercom_tools import (
     log_conversation_turn,
 )
 from backend.config import MODEL
+from backend.llm import client as claude  # shared client: TLS on by default + timeouts
 
 
 def _ctx(config):
@@ -53,11 +50,6 @@ def _ctx(config):
     safely without the checkpointer trying to serialize it.
     """
     return config["configurable"]["ctx"]
-
-load_dotenv()
-
-_http_client = httpx.Client(verify=False)
-claude = anthropic.Anthropic(http_client=_http_client)
 
 
 # ---------------------------------------------------------------------------

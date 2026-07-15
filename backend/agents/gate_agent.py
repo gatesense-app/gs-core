@@ -19,20 +19,9 @@ import json
 import uuid
 from datetime import datetime
 
-import httpx
-import anthropic
-from dotenv import load_dotenv
-
 from backend.tools.gate_tools import execute_tool
 from backend.config import MODEL
-
-load_dotenv()
-
-# Corporate proxy intercepts TLS and re-signs with an internal CA that Python
-# doesn't trust. This disables verification for the Anthropic API calls only.
-# Replace with SSL_CERT_FILE pointing to your corporate CA cert for a proper fix.
-_http_client = httpx.Client(verify=False)
-client = anthropic.Anthropic(http_client=_http_client)
+from backend.llm import client  # shared client: TLS on by default + timeouts
 
 # ---------------------------------------------------------------------------
 # Tool definitions — Claude reads these to know what it's allowed to call.

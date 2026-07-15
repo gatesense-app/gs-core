@@ -26,15 +26,20 @@ export async function apiFetch(path, { method = 'GET', body, auth = true } = {})
     body: body != null ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    let detail
+    // The API returns a uniform {error: {code, message}}; fall back to older
+    // shapes (and plain text) so a proxy/error page still surfaces something.
+    let message
+    let code
     try {
       const j = await res.json()
-      detail = j.detail ?? JSON.stringify(j)
+      message = j.error?.message ?? j.detail ?? JSON.stringify(j)
+      code = j.error?.code
     } catch {
-      detail = await res.text()
+      message = await res.text()
     }
-    const err = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    const err = new Error(typeof message === 'string' ? message : JSON.stringify(message))
     err.status = res.status
+    err.code = code
     throw err
   }
   if (res.status === 204) return null

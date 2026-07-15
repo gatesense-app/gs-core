@@ -11,17 +11,10 @@ Decision logic:
 """
 
 import json
-import httpx
-import anthropic
-from dotenv import load_dotenv
 
 from backend.tools.delivery_tools import execute_tool
 from backend.config import MODEL
-
-load_dotenv()
-
-_http_client = httpx.Client(verify=False)
-client = anthropic.Anthropic(http_client=_http_client)
+from backend.llm import client  # shared client: TLS on by default + timeouts
 
 DELIVERY_TOOLS = [
     {

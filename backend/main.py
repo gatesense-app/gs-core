@@ -30,6 +30,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from backend import db_models as m
+from backend import errors
 from backend.deps import (
     CurrentUser,
     get_db,
@@ -38,6 +39,7 @@ from backend.deps import (
     scoped_session,
 )
 from backend.pipeline import handle_resident_reply, handle_visitor_entry, serialize
+from backend.ratelimit import limit_replies, limit_sessions
 from backend.realtime import manager
 from backend.routers import admin, auth, portal, residents, societies, users, visitors
 from backend.routers.common import parse_uuid
@@ -53,6 +55,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="GateSense", version="0.1.0", lifespan=lifespan)
+
+# One error shape everywhere; unhandled errors never leak internals (Phase 7).
+errors.install(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -111,7 +116,7 @@ def _assert_flat_access(db, user: CurrentUser, row: m.VisitorSession) -> None:
         raise HTTPException(status_code=404, detail="Session not found")
 
 
-@app.post("/sessions", status_code=201)
+@app.post("/sessions", status_code=201, dependencies=[Depends(limit_sessions)])
 def create_session(body: VisitorEntryRequest, user: CurrentUser = Depends(_kiosk), db=Depends(get_db)):
     """
     Guard submits a new visitor. Runs the Gate Agent (and Delivery Agent
@@ -126,7 +131,7 @@ def create_session(body: VisitorEntryRequest, user: CurrentUser = Depends(_kiosk
     return data
 
 
-@app.post("/sessions/{session_id}/reply")
+@app.post("/sessions/{session_id}/reply", dependencies=[Depends(limit_replies)])
 def submit_reply(session_id: str, body: ReplyRequest, user: CurrentUser = Depends(_replier), db=Depends(get_db)):
     """Resident (or guard) submits a reply to the intercom agent."""
     row = db.get(m.VisitorSession, parse_uuid(session_id))

@@ -27,6 +27,20 @@ load_dotenv()
 # behaviour the prompts were tuned for.
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
+# A hung Claude call would otherwise hold a visitor at the gate indefinitely.
+# On timeout the pipeline falls back to a human rather than guessing.
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+
+# ---------------------------------------------------------------------------
+# Rate limits (per society) on the endpoints that trigger Claude calls.
+# Generous enough for a real gate; tight enough that a retry loop can't run up
+# the API bill or starve other tenants. See backend/ratelimit.py.
+# ---------------------------------------------------------------------------
+RATE_LIMIT_WINDOW_SECONDS = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_SESSIONS = int(os.getenv("RATE_LIMIT_SESSIONS", "30"))  # visitor entries / window
+RATE_LIMIT_REPLIES = int(os.getenv("RATE_LIMIT_REPLIES", "60"))    # replies / window
+
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
