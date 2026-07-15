@@ -25,30 +25,32 @@ KEY CONCEPTS introduced here:
   - thread_id in config: identifies which session is being resumed
 """
 
-import json
-import httpx
 from typing import Literal
 from typing_extensions import TypedDict
 
-import anthropic
-from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, Command
+
+from backend.checkpointer import get_checkpointer
 
 from backend.tools.intercom_tools import (
     send_notification,
-    get_visitor_context,
     update_visitor_session,
     escalate_to_backup_contact,
     log_conversation_turn,
 )
+from backend.config import MODEL
+from backend.llm import client as claude  # shared client: TLS on by default + timeouts
 
-load_dotenv()
 
-_http_client = httpx.Client(verify=False)
-claude = anthropic.Anthropic(http_client=_http_client)
-MODEL = "claude-sonnet-4-6"
+def _ctx(config):
+    """Pull the request's tenant-scoped IntercomContext out of the run config.
+
+    ctx is injected per stream() call (see start_intercom_session / submit_reply)
+    and is NOT part of the checkpointed state, so a live DB session can ride here
+    safely without the checkpointer trying to serialize it.
+    """
+    return config["configurable"]["ctx"]
 
 
 # ---------------------------------------------------------------------------
@@ -80,9 +82,10 @@ class IntercomState(TypedDict):
 # NODE 1: notify_resident
 # Composes a context-aware first message using Claude, then sends it.
 # ---------------------------------------------------------------------------
-def notify_resident(state: IntercomState) -> dict:
+def notify_resident(state: IntercomState, config) -> dict:
     """Compose and send the initial notification to the resident."""
     print(f"\n[Node: notify_resident]")
+    ctx = _ctx(config)
 
     # Ask Claude to draft a concise, friendly notification
     prompt = (
@@ -96,12 +99,13 @@ def notify_resident(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=200,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}],
     )
     message_text = response.content[0].text
 
-    send_notification(state["flat_number"], state["resident_name"], message_text)
-    log_conversation_turn(state["session_id"], 1, "agent", message_text)
+    send_notification(ctx, state["flat_number"], state["resident_name"], message_text)
+    log_conversation_turn(ctx, 1, "agent", message_text)
 
     return {
         "turn_number": 1,
@@ -115,7 +119,7 @@ def notify_resident(state: IntercomState) -> dict:
 # control back to the caller. The graph resumes when .invoke() is called
 # again with the resident's reply in the Command.resume value.
 # ---------------------------------------------------------------------------
-def await_reply(state: IntercomState) -> dict:
+def await_reply(state: IntercomState, config) -> dict:
     """
     Pause execution and wait for the resident's reply.
 
@@ -125,12 +129,13 @@ def await_reply(state: IntercomState) -> dict:
       3. When the caller calls graph.invoke() again with Command(resume=<value>),
          execution picks up from exactly this line.
     """
-    print(f"\n[Node: await_reply] Graph paused — waiting for resident reply...")
+    print(f"\n[Node: await_reply] Graph paused - waiting for resident reply...")
     reply = interrupt("Waiting for resident reply")   # execution suspends here
     print(f"[Node: await_reply] Resumed with reply: '{reply}'")
 
+    ctx = _ctx(config)
     turn = state["turn_number"] + 1
-    log_conversation_turn(state["session_id"], turn, "resident", reply)
+    log_conversation_turn(ctx, turn, "resident", reply)
 
     return {
         "last_resident_reply": reply,
@@ -163,6 +168,7 @@ def classify_reply(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=10,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}],
     )
     intent = response.content[0].text.strip().lower()
@@ -179,12 +185,13 @@ def classify_reply(state: IntercomState) -> dict:
 # Resident asked a question — relay it to the guard, get an answer,
 # send it back to the resident, then loop back to await_reply.
 # ---------------------------------------------------------------------------
-def clarify_loop(state: IntercomState) -> dict:
+def clarify_loop(state: IntercomState, config) -> dict:
     """Handle a clarification request: ask guard, relay answer to resident."""
     print(f"\n[Node: clarify_loop]")
+    ctx = _ctx(config)
 
     # In production: send a message to the guard kiosk UI and wait for input.
-    # Here we simulate it with another interrupt() — same mechanism.
+    # Here we simulate it with another interrupt() - same mechanism.
     question = state["last_resident_reply"]
     guard_prompt = f"Resident of {state['flat_number']} asks: \"{question}\" — what is your answer?"
     print(f"[Guard prompt]: {guard_prompt}")
@@ -201,16 +208,19 @@ def clarify_loop(state: IntercomState) -> dict:
     response = claude.messages.create(
         model=MODEL,
         max_tokens=150,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": relay_prompt}],
     )
     relay_message = response.content[0].text
 
-    send_notification(state["flat_number"], state["resident_name"], relay_message)
-    turn = state["turn_number"] + 1
-    log_conversation_turn(state["session_id"], turn, "agent", relay_message)
+    guard_turn = state["turn_number"] + 1
+    relay_turn = guard_turn + 1
+    log_conversation_turn(ctx, guard_turn, "guard", guard_answer)
+    send_notification(ctx, state["flat_number"], state["resident_name"], relay_message)
+    log_conversation_turn(ctx, relay_turn, "agent", relay_message)
 
     return {
-        "turn_number": turn,
+        "turn_number": relay_turn,
         "conversation_history": state["conversation_history"] + [
             {"speaker": "guard", "message": guard_answer},
             {"speaker": "agent", "message": relay_message},
@@ -222,12 +232,13 @@ def clarify_loop(state: IntercomState) -> dict:
 # NODE 5: resolve
 # Resident approved or denied — finalize the session.
 # ---------------------------------------------------------------------------
-def resolve(state: IntercomState) -> dict:
+def resolve(state: IntercomState, config) -> dict:
     """Commit the resident's final approve/deny decision."""
     print(f"\n[Node: resolve] Decision: {state['decision']}")
+    ctx = _ctx(config)
 
     status = "approved" if state["decision"] == "approve" else "denied"
-    update_visitor_session(state["session_id"], status, resolved_by="resident")
+    update_visitor_session(ctx, status, resolved_by="resident")
 
     reason = f"Resident {state['resident_name']} replied: '{state['last_resident_reply']}'"
     return {"decision": status, "decision_reason": reason}
@@ -237,16 +248,17 @@ def resolve(state: IntercomState) -> dict:
 # NODE 6: escalate
 # Timeout or defer — hand off to backup contact or guard default policy.
 # ---------------------------------------------------------------------------
-def escalate(state: IntercomState) -> dict:
+def escalate(state: IntercomState, config) -> dict:
     """Escalate to backup contact when resident times out or defers."""
     print(f"\n[Node: escalate]")
+    ctx = _ctx(config)
 
     reason = (
         "Resident timed out" if state.get("timed_out")
         else f"Resident deferred: '{state['last_resident_reply']}'"
     )
-    escalate_to_backup_contact(state["session_id"], reason)
-    update_visitor_session(state["session_id"], "escalated", resolved_by="backup_contact")
+    escalate_to_backup_contact(ctx, reason)
+    update_visitor_session(ctx, "escalated", resolved_by="backup_contact")
 
     return {"decision": "escalated", "decision_reason": reason}
 
@@ -290,21 +302,37 @@ def build_intercom_graph():
     builder.add_edge("resolve", END)
     builder.add_edge("escalate", END)
 
-    # MemorySaver: checkpoints state in memory so interrupt() can pause/resume.
-    # Swap with SqliteSaver("sessions.db") or PostgresSaver for persistence.
-    checkpointer = MemorySaver()
-    return builder.compile(checkpointer=checkpointer)
+    # The checkpointer is what makes interrupt() survive the gap between the
+    # notification and the resident's reply — which is a different HTTP request,
+    # and possibly a different process after a deploy. Postgres-backed; see
+    # backend/checkpointer.py.
+    return builder.compile(checkpointer=get_checkpointer())
 
 
-# Module-level graph instance (shared across calls)
-graph = build_intercom_graph()
+# Built on first use, not at import: compiling opens the checkpointer's DB pool,
+# and importing this module (tests, tooling, `--help`) shouldn't require a
+# reachable database.
+_graph = None
+
+
+def get_graph():
+    global _graph
+    if _graph is None:
+        _graph = build_intercom_graph()
+    return _graph
 
 
 # ---------------------------------------------------------------------------
 # PUBLIC API
 # ---------------------------------------------------------------------------
+def _config(ctx):
+    """Run config: thread_id identifies the checkpointed session; ctx injects the
+    request's tenant-scoped DB session (not checkpointed)."""
+    return {"configurable": {"thread_id": str(ctx.session_uuid), "ctx": ctx}}
+
+
 def start_intercom_session(
-    session_id: str,
+    ctx,
     flat_number: str,
     visitor_name: str,
     purpose_detail: str,
@@ -314,9 +342,10 @@ def start_intercom_session(
     Start a new intercom session. The graph runs until the first interrupt()
     (after sending the notification), then pauses and returns.
 
-    Returns {"status": "awaiting_reply", "session_id": session_id}
+    Returns {"status", "session_id", "conversation_history"} — the pipeline
+    mirrors conversation_history onto the session row for the UI.
     """
-    config = {"configurable": {"thread_id": session_id}}
+    session_id = str(ctx.session_uuid)
     initial_state: IntercomState = {
         "session_id": session_id,
         "flat_number": flat_number,
@@ -332,24 +361,27 @@ def start_intercom_session(
     }
 
     # Run until the first interrupt
-    for event in graph.stream(initial_state, config=config, stream_mode="values"):
-        pass  # events emitted per node; we only care about the final pause
+    final_state = None
+    for event in get_graph().stream(initial_state, config=_config(ctx), stream_mode="values"):
+        final_state = event
 
-    return {"status": "awaiting_reply", "session_id": session_id}
+    return {
+        "status": "awaiting_reply",
+        "session_id": session_id,
+        "conversation_history": final_state.get("conversation_history", []) if final_state else [],
+    }
 
 
-def submit_reply(session_id: str, reply: str) -> dict:
+def submit_reply(ctx, reply: str) -> dict:
     """
     Resume a paused session with the resident's (or guard's) reply.
     The graph picks up exactly where interrupt() left it.
 
-    Returns the current state — check state["decision"] to know if it's done.
+    Returns the current state — check ["done"] to know if it's resolved.
     """
-    config = {"configurable": {"thread_id": session_id}}
-
     final_state = None
-    for event in graph.stream(
-        Command(resume=reply), config=config, stream_mode="values"
+    for event in get_graph().stream(
+        Command(resume=reply), config=_config(ctx), stream_mode="values"
     ):
         final_state = event
 
@@ -357,11 +389,12 @@ def submit_reply(session_id: str, reply: str) -> dict:
     done = decision in ("approved", "denied", "escalated")
 
     return {
-        "session_id": session_id,
+        "session_id": str(ctx.session_uuid),
         "done": done,
         "decision": decision,
         "decision_reason": final_state.get("decision_reason", "") if final_state else "",
         "status": "resolved" if done else "awaiting_reply",
+        "conversation_history": final_state.get("conversation_history", []) if final_state else [],
     }
 
 
@@ -369,52 +402,7 @@ def submit_reply(session_id: str, reply: str) -> dict:
 # Manual test — simulates the full lifecycle step by step
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import uuid
-
-    SESSION = str(uuid.uuid4())[:8]
-    print(f"\n{'='*60}")
-    print(f"INTERCOM AGENT TEST — session {SESSION}")
-    print(f"{'='*60}")
-
-    # Step 1: Gate agent routed an unknown guest — start the intercom session
-    print("\n--- Step 1: Starting session (graph runs to first interrupt) ---")
-    result = start_intercom_session(
-        session_id=SESSION,
-        flat_number="A-202",
-        visitor_name="Vikram Nair",
-        purpose_detail="Friend visiting for dinner",
-        resident_name="Priya Sharma",
-    )
-    print(f"Graph paused. Status: {result['status']}")
-
-    # Step 2: Simulate resident asking a clarifying question
-    print("\n--- Step 2: Resident replies with a question ---")
-    result = submit_reply(SESSION, "Who is it? I'm not expecting anyone.")
-    print(f"After reply: done={result['done']}, decision={result['decision']}")
-
-    # Step 3: Simulate guard providing clarification
-    print("\n--- Step 3: Guard provides clarification ---")
-    result = submit_reply(SESSION, "He says he's Vikram, your college friend, here for dinner")
-    print(f"After guard input: done={result['done']}, decision={result['decision']}")
-
-    # Step 4: Resident now approves
-    print("\n--- Step 4: Resident approves ---")
-    result = submit_reply(SESSION, "Oh yes! Please let him in, ALLOW")
-    print(f"\nFinal: done={result['done']}, decision={result['decision']}")
-    print(f"Reason: {result['decision_reason']}")
-
-    print(f"\n{'='*60}")
-    print("SECOND TEST: Resident denies immediately")
-    print(f"{'='*60}")
-
-    SESSION2 = str(uuid.uuid4())[:8]
-    start_intercom_session(
-        session_id=SESSION2,
-        flat_number="A-202",
-        visitor_name="Unknown Salesman",
-        purpose_detail="Sales visit",
-        resident_name="Priya Sharma",
-    )
-    result = submit_reply(SESSION2, "DENY, I don't want any salesman")
-    print(f"\nFinal: done={result['done']}, decision={result['decision']}")
-    print(f"Reason: {result['decision_reason']}")
+    # Standalone demos were removed: the intercom graph now requires an
+    # IntercomContext (a tenant-scoped DB session) injected via config. Exercise
+    # it through the pipeline / API, or the backend/tests suite, instead.
+    print("The intercom agent requires an IntercomContext - run it via the API or tests.")

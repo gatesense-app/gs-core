@@ -1,11 +1,290 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ---------------------------------------------------------------------------
+   Single brand theme. Three colors only:
+     white     #ffffff  — surfaces / page
+     dark blue #010d52  — text, logo, borders (navy)
+     turquoise #1ed5c5  — accent, primary buttons, focus, highlights
+   Neutrals are navy at reduced opacity; status/agent colors stay semantic.
+--------------------------------------------------------------------------- */
+:root {
+  --c-navy: #010d52;
+  --c-turq: #1ed5c5;
+
+  --c-bg: #ffffff;
+  --c-panel: #ffffff;
+  --c-panel-alt: rgba(1, 13, 82, 0.045);
+  --c-border: rgba(1, 13, 82, 0.14);
+  --c-row-border: rgba(1, 13, 82, 0.07);
+  --c-text: #010d52;
+  --c-text-body: rgba(1, 13, 82, 0.82);
+  --c-sub: rgba(1, 13, 82, 0.62);
+  --c-muted: rgba(1, 13, 82, 0.45);
+
+  /* Accent (turquoise) — for fills, focus, borders, decoration. */
+  --c-accent: #1ed5c5;
+  --c-accent-2: #010d52;          /* navy — gradient partner (logo, decoration) */
+  --c-accent-soft: #010d52;       /* accent TEXT on white must be navy (turquoise fails contrast) */
+  --c-accent-bg: rgba(30, 213, 197, 0.14);
+  --c-accent-border: rgba(30, 213, 197, 0.5);
+  --c-link: #010d52;
+
+  /* Primary button: brand turquoise + navy text (9.6:1).
+     Note if you're tempted to swap the fill: white ink on this is 1.85:1, so it
+     can only ever take dark ink. Navy fill was tried and dissolved into the
+     headings (the page is already mostly navy). The fill is fine — what it
+     needed was room to breathe, not a different colour. */
+  --c-btn-bg: #1ed5c5;
+  --c-btn-text: #010d52;
+
+  --c-input-bg: #ffffff;
+  --c-nav-bg: rgba(255, 255, 255, 0.85);
+  --c-error: #dc2626;
+  --c-ok: #059669;
+  --c-card-shadow: 0 2px 14px -8px rgba(1, 13, 82, 0.28);
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #0f1117;
-  color: #e2e8f0;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--c-bg);
+  color: var(--c-text-body);
   min-height: 100vh;
 }
 
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: inherit; }
+
+/* ---------------------------------------------------------------------------
+   Focus.
+   Inputs used to set outline:none with nothing in its place, which left
+   keyboard users with no idea where they were. One ring, everywhere. Navy is
+   the only brand colour readable against BOTH white and turquoise, so it works
+   on every surface. :focus-visible keeps it off mouse clicks.
+--------------------------------------------------------------------------- */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-navy);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons.
+   These live here rather than in inline style objects because :hover,
+   :focus-visible and :disabled cannot be expressed inline — which is why the
+   app had none of them.
+
+   min-height 44px is the Apple HIG touch target; the guard taps this on a phone
+   with a visitor waiting.
+
+   Hover deliberately uses filter: brightness() instead of a new hex, so the
+   palette stays exactly white / navy / turquoise.
+--------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  /* Matches the landing's .lp-btn: 18px of side padding shrink-wrapped the
+     label. */
+  padding: 12px 24px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 150ms ease, border-color 150ms ease,
+              color 150ms ease, filter 150ms ease, opacity 150ms ease;
+}
+.btn:hover:not(:disabled) { filter: brightness(0.94); }
+.btn:active:not(:disabled) { filter: brightness(0.88); }
+/* Disabled must not look identical to enabled: a submit runs several seconds
+   while the agents think, and the button used to stay fully saturated and
+   cursor:pointer the whole time. */
+.btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+
+/* One primary per view. Navy on deep turquoise = 5.9:1.
+   No hover override needed: the shared darken reads clearly on a mid-tone fill
+   (it didn't on navy, which is why that experiment needed one). */
+.btn--primary { background: var(--c-btn-bg); color: var(--c-btn-text); }
+
+/* Subordinate: same shape, quieter. */
+.btn--secondary {
+  background: var(--c-panel);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+.btn--secondary:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  background: var(--c-accent-bg);
+  filter: none;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--c-sub);
+  border-color: var(--c-border);
+}
+.btn--ghost:hover:not(:disabled) {
+  color: var(--c-text);
+  border-color: var(--c-accent);
+  filter: none;
+}
+
+/* Decision actions. Semantic, not brand — green/red carry the meaning. */
+.btn--success {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.btn--danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.btn--block { width: 100%; }
+.btn--sm { min-height: 44px; padding: 8px 14px; font-size: 13px; }
+
+/* Remove-affordance inside a chip.
+   A 44px visual button would dwarf the chip, so the *hit area* is extended past
+   the visual bounds instead (the web equivalent of hitSlop): 28px + 8px on each
+   side = 44px tappable. Chip gap is 12px so neighbouring hit areas don't
+   overlap and steal each other's taps. */
+.chip-x {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 150ms ease, background-color 150ms ease;
+}
+.chip-x::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.chip-x:hover { opacity: 1; background: rgba(1, 13, 82, 0.08); }
+
+/* ---------------------------------------------------------------------------
+   Inputs
+--------------------------------------------------------------------------- */
+.input, .select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--c-border);
+  background: var(--c-input-bg);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 150ms ease;
+}
+.input:hover:not(:disabled), .select:hover:not(:disabled) {
+  border-color: var(--c-accent-border);
+}
+.input:focus-visible, .select:focus-visible { border-color: var(--c-accent); }
+.input::placeholder { color: var(--c-muted); }
+.input:disabled, .select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.field { display: block; font-size: 13px; color: var(--c-sub); margin-bottom: 6px; }
+
+/* ---------------------------------------------------------------------------
+   Headings. Real h1/h2 elements — the app had none, so screen readers got no
+   structure to navigate by.
+--------------------------------------------------------------------------- */
+h1, h2, h3 { color: var(--c-text); line-height: 1.25; font-weight: 700; }
+.page-title { font-size: 22px; }
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   App nav.
+   Was a no-wrap flex row: at 375px a society_admin's 5 links + email + Sign out
+   pushed the page 136px wide, which made EVERY route scroll sideways — even the
+   kiosk, which is just a form. It wraps now, and the email (the single widest
+   item at ~183px) is dropped on small screens; the role still reads on the
+   account chip and Sign out stays reachable.
+--------------------------------------------------------------------------- */
+.app-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-nav-bg);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.app-nav__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.app-nav__user {
+  font-size: 13px;
+  color: var(--c-muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .app-nav { gap: 14px; padding: 12px 16px; }
+  .app-nav__user { display: none; }
+}
+
+/* Wide content scrolls inside its own container so the PAGE never scrolls
+   sideways. Tables here are 6-7 columns and cannot fit a phone. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Page padding tightens on small screens — 28px of gutter is a lot of a 375px
+   screen. */
+@media (max-width: 640px) {
+  .page-pad { padding: 24px 16px !important; }
+}
+
+/* Columns that earn their width on a desktop but not on a phone (a raw session
+   UUID, secondary detail). Hidden rather than squeezed, so what remains stays
+   readable instead of everything wrapping into mush. */
+@media (max-width: 640px) {
+  .col-hide-sm { display: none !important; }
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

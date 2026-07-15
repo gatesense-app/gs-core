@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-
-const API = 'http://localhost:8000'
+import { apiFetch } from '../api'
+import { useAuth } from '../auth'
+import { openSessionsSocket } from '../realtime'
 
 const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' }
 const STATUS_COLOR = {
@@ -11,13 +12,12 @@ const STATUS_COLOR = {
 
 const s = {
   page: { maxWidth: 860, margin: '0 auto', padding: '32px 24px' },
-  back: { fontSize: 13, color: '#64748b', marginBottom: 24, display: 'block' },
-  card: { background: '#131620', borderRadius: 12, border: '1px solid #1e2130', padding: 24, marginBottom: 24 },
+  back: { fontSize: 13, color: 'var(--c-muted)', marginBottom: 24, display: 'block' },
+  card: { background: 'var(--c-panel)', borderRadius: 12, border: '1px solid var(--c-border)', padding: 24, marginBottom: 24, boxShadow: 'var(--c-card-shadow)' },
   row: { display: 'flex', gap: 32, flexWrap: 'wrap' },
   kv: { marginBottom: 16 },
-  key: { fontSize: 11, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 },
-  val: { fontSize: 15, color: '#e2e8f0', fontWeight: 500 },
-  sectionTitle: { fontSize: 13, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 },
+  key: { fontSize: 11, color: 'var(--c-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 },
+  val: { fontSize: 15, color: 'var(--c-text)', fontWeight: 500 },
   badge: (status) => ({
     display: 'inline-block', padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 500,
     background: STATUS_COLOR[status] + '22', color: STATUS_COLOR[status],
@@ -26,39 +26,43 @@ const s = {
 
   // Trace timeline
   timeline: { position: 'relative', paddingLeft: 28 },
-  line: { position: 'absolute', left: 9, top: 8, bottom: 8, width: 2, background: '#1e2130' },
+  line: { position: 'absolute', left: 9, top: 8, bottom: 8, width: 2, background: 'var(--c-border)' },
   traceItem: { position: 'relative', marginBottom: 24 },
   dot: (agent) => ({
     position: 'absolute', left: -24, top: 4,
     width: 12, height: 12, borderRadius: '50%',
-    background: AGENT_COLOR[agent] || '#475569',
-    border: '2px solid #0f1117',
+    background: AGENT_COLOR[agent] || 'var(--c-muted)',
+    border: '2px solid var(--c-bg)',
   }),
   agentLabel: (agent) => ({
     display: 'inline-block', fontSize: 11, fontWeight: 600,
-    color: AGENT_COLOR[agent] || '#64748b',
+    color: AGENT_COLOR[agent] || 'var(--c-muted)',
     textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
   }),
-  action: { fontSize: 14, color: '#f1f5f9', fontWeight: 500, marginBottom: 6 },
-  reasoning: { fontSize: 13, color: '#94a3b8', lineHeight: 1.6, marginBottom: 8 },
+  action: { fontSize: 14, color: 'var(--c-text)', fontWeight: 500, marginBottom: 6 },
+  reasoning: { fontSize: 13, color: 'var(--c-sub)', lineHeight: 1.6, marginBottom: 8 },
   tools: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   toolChip: {
     fontSize: 11, padding: '2px 8px', borderRadius: 4,
-    background: '#1e2130', color: '#64748b', fontFamily: 'monospace',
+    background: 'var(--c-panel-alt)', color: 'var(--c-muted)', fontFamily: 'monospace',
   },
-  ts: { fontSize: 11, color: '#334155', marginTop: 6 },
+  ts: { fontSize: 11, color: 'var(--c-muted)', marginTop: 6 },
 
-  // Reply box
+  // Audit (admin-only): escalations + notification deliveries
+  auditRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16,
+    padding: '10px 0', borderBottom: '1px solid var(--c-row-border)',
+  },
+  auditMain: { fontSize: 13, color: 'var(--c-text)' },
+  auditMeta: { fontSize: 11, color: 'var(--c-muted)', marginTop: 3 },
+  pill: (color) => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+    background: color + '22', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap',
+  }),
+  none: { fontSize: 13, color: 'var(--c-muted)' },
+
+  // Reply box (look comes from .input / .btn in index.css)
   replyBox: { display: 'flex', gap: 10, marginTop: 16 },
-  replyInput: {
-    flex: 1, padding: '10px 14px', borderRadius: 8,
-    border: '1px solid #1e2130', background: '#0f1117',
-    color: '#e2e8f0', fontSize: 14, outline: 'none',
-  },
-  replyBtn: {
-    padding: '10px 20px', borderRadius: 8, border: 'none',
-    background: '#7c3aed', color: '#fff', fontSize: 14, fontWeight: 600,
-  },
 
   // Conversation
   convItem: (speaker) => ({
@@ -67,10 +71,10 @@ const s = {
   }),
   bubble: (speaker) => ({
     maxWidth: '75%', padding: '8px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.5,
-    background: speaker === 'resident' ? '#7c3aed' : speaker === 'agent' ? '#1e2130' : '#0f2a1a',
-    color: speaker === 'resident' ? '#fff' : '#e2e8f0',
+    background: speaker === 'resident' ? 'var(--c-accent-2)' : speaker === 'guard' ? 'rgba(16,185,129,0.14)' : 'var(--c-panel-alt)',
+    color: speaker === 'resident' ? '#fff' : 'var(--c-text)',
   }),
-  speakerLabel: { fontSize: 10, color: '#475569', marginBottom: 4, textTransform: 'uppercase' },
+  speakerLabel: { fontSize: 10, color: 'var(--c-muted)', marginBottom: 4, textTransform: 'uppercase' },
 }
 
 function fmt(iso) {
@@ -78,38 +82,58 @@ function fmt(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+const NOTIF_COLOR = { sent: '#22c55e', delivered: '#22c55e', failed: '#ef4444' }
+
 export default function SessionDetail() {
   const { id } = useParams()
+  const { user } = useAuth()
   const [session, setSession] = useState(null)
+  const [audit, setAudit] = useState(null)
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
 
+  // Only society/platform admins may read the audit trail.
+  const isAdmin = user?.role === 'society_admin' || user?.role === 'platform_admin'
+
   async function load() {
-    const res = await fetch(`${API}/sessions/${id}`)
-    if (res.ok) setSession(await res.json())
+    try {
+      setSession(await apiFetch(`/sessions/${id}`))
+    } catch { /* not found / not authorized */ }
   }
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 3000)
-    return () => clearInterval(t)
+    const stop = openSessionsSocket(msg => {
+      if (msg.type === 'session_update' && msg.session.session_id === id) setSession(msg.session)
+    })
+    const t = setInterval(load, 10000)  // fallback in case the socket drops
+    return () => { stop(); clearInterval(t) }
   }, [id])
+
+  // Escalations / notification deliveries live in their own tables, so they need
+  // a second call. Re-fetched when the session resolves so late escalations show.
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    apiFetch(`/admin/sessions/${id}/audit`)
+      .then(a => { if (!cancelled) setAudit(a) })
+      .catch(() => { /* non-fatal: the trace above still renders */ })
+    return () => { cancelled = true }
+  }, [id, isAdmin, session?.status])
 
   async function sendReply(e) {
     e.preventDefault()
     if (!reply.trim()) return
     setSending(true)
-    await fetch(`${API}/sessions/${id}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reply }),
-    })
+    try {
+      await apiFetch(`/sessions/${id}/reply`, { method: 'POST', body: { reply } })
+    } catch { /* surfaced on next poll */ }
     setReply('')
     setSending(false)
     load()
   }
 
-  if (!session) return <div style={{ padding: 40, color: '#475569' }}>Loading...</div>
+  if (!session) return <div style={{ padding: 40, color: 'var(--c-muted)' }}>Loading...</div>
 
   const isResolved = ['auto_approved', 'approved', 'denied', 'escalated', 'expired'].includes(session.status)
 
@@ -151,9 +175,9 @@ export default function SessionDetail() {
 
       {/* Decision trace timeline */}
       <div style={s.card}>
-        <div style={s.sectionTitle}>Decision Trace</div>
+        <h2 className="section-title">Decision Trace</h2>
         {session.decision_trace.length === 0 && (
-          <div style={{ color: '#475569', fontSize: 13 }}>No trace entries yet.</div>
+          <div style={{ color: 'var(--c-muted)', fontSize: 13 }}>No trace entries yet.</div>
         )}
         <div style={s.timeline}>
           <div style={s.line} />
@@ -174,10 +198,47 @@ export default function SessionDetail() {
         </div>
       </div>
 
+      {/* Escalations + notification deliveries — the evidence behind the trace.
+          Admin-only; the backend gates /admin/* to society_admin+. */}
+      {isAdmin && audit && (
+        <>
+          {audit.escalations.length > 0 && (
+            <div style={s.card}>
+              <h2 className="section-title">Escalations</h2>
+              {audit.escalations.map(e => (
+                <div key={e.id} style={s.auditRow}>
+                  <div>
+                    <div style={s.auditMain}>{e.reason}</div>
+                    <div style={s.auditMeta}>to {e.escalated_to} · {fmt(e.created_at)}</div>
+                  </div>
+                  <span style={s.pill(e.status === 'open' ? '#f97316' : '#22c55e')}>{e.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={s.card}>
+            <h2 className="section-title">Notifications</h2>
+            {audit.notifications.length === 0 && <div style={s.none}>No notifications sent.</div>}
+            {audit.notifications.map(n => (
+              <div key={n.id} style={s.auditRow}>
+                <div>
+                  <div style={s.auditMain}>
+                    {n.resident_name || 'Resident'}{n.flat_number ? ` · ${n.flat_number}` : ''}
+                  </div>
+                  <div style={s.auditMeta}>via {n.channel} · {fmt(n.created_at)}</div>
+                </div>
+                <span style={s.pill(NOTIF_COLOR[n.status] || '#64748b')}>{n.status}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* Conversation (intercom sessions) */}
       {session.conversation_history.length > 0 && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>Conversation</div>
+          <h2 className="section-title">Conversation</h2>
           {session.conversation_history.map((turn, i) => (
             <div key={i} style={s.convItem(turn.speaker)}>
               <div>
@@ -192,26 +253,28 @@ export default function SessionDetail() {
       {/* Resident reply input */}
       {session.status === 'awaiting_resident' && (
         <div style={s.card}>
-          <div style={s.sectionTitle}>Resident Reply</div>
-          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+          <h2 className="section-title">Resident Reply</h2>
+          <div style={{ fontSize: 13, color: 'var(--c-sub)', marginBottom: 12 }}>
             Simulate the resident's response (or guard clarification if prompted)
           </div>
           <form onSubmit={sendReply} style={s.replyBox}>
             <input
-              style={s.replyInput}
+              className="input"
+              style={{ flex: 1 }}
+              aria-label="Reply as the resident: ALLOW, DENY, or a question"
               value={reply}
               onChange={e => setReply(e.target.value)}
               placeholder="Type ALLOW, DENY, or a question..."
             />
-            <button style={s.replyBtn} disabled={sending}>
-              {sending ? '...' : 'Send'}
+            <button className="btn btn--primary" disabled={sending}>
+              {sending ? 'Sending...' : 'Send'}
             </button>
           </form>
         </div>
       )}
 
       {isResolved && (
-        <div style={{ textAlign: 'center', color: '#475569', fontSize: 13, marginTop: 8 }}>
+        <div style={{ textAlign: 'center', color: 'var(--c-muted)', fontSize: 13, marginTop: 8 }}>
           Session resolved at {fmt(session.resolved_at)}
         </div>
       )}

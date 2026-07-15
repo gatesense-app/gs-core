@@ -1,4 +1,3 @@
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -15,17 +14,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# DATABASE_URL env var takes precedence over alembic.ini's sqlalchemy.url,
-# matching the CI workflows and .env.example.
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# Take the URL from backend.config, which resolves it as:
+#   real env (CI / Docker / Railway)  >  .env  >  local default.
+# alembic.ini deliberately leaves sqlalchemy.url blank so there is exactly one
+# source of truth and no stale copy to drift.
+from backend.config import DATABASE_URL  # noqa: E402
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
+
+# Model metadata for 'autogenerate' support.
+from backend.db import Base  # noqa: E402
+from backend import db_models  # noqa: E402,F401  (imported to populate Base.metadata)
+
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

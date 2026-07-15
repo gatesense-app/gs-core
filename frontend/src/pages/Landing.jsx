@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import './Landing.css'
+import logoUrl from '../assets/logo/gs-logo-horizontal.png'
 
 const AGENT_COLOR = { gate: '#4f46e5', delivery: '#059669', intercom: '#db2777' }
 
@@ -82,7 +83,7 @@ export default function Landing() {
 
       <header className="lp-nav">
         <div className="lp-nav-inner">
-          <Link to="/" className="lp-logo">GateSense</Link>
+          <Link to="/" className="lp-logo"><img src={logoUrl} alt="GateSense" className="lp-logo-img" /></Link>
 
           <nav className="lp-nav-links" aria-label="Primary">
             <a href="#how-it-works">How it works</a>
@@ -264,7 +265,7 @@ export default function Landing() {
       <footer className="lp-footer">
         <div className="lp-footer-inner">
           <div>
-            <div className="lp-logo">GateSense</div>
+            <img src={logoUrl} alt="GateSense" className="lp-logo-img lp-logo-img--footer" />
             <p>AI visitor management for gated communities.</p>
           </div>
           <div className="lp-footer-links">

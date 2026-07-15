@@ -11,18 +11,10 @@ Decision logic:
 """
 
 import json
-import httpx
-import anthropic
-from dotenv import load_dotenv
 
 from backend.tools.delivery_tools import execute_tool
-
-load_dotenv()
-
-_http_client = httpx.Client(verify=False)
-client = anthropic.Anthropic(http_client=_http_client)
-
-MODEL = "claude-sonnet-4-6"
+from backend.config import MODEL
+from backend.llm import client  # shared client: TLS on by default + timeouts
 
 DELIVERY_TOOLS = [
     {
@@ -155,22 +147,23 @@ Be concise in your final text response.
 
 
 def run_delivery_agent(
-    session_id: str,
+    ctx,
     visitor_name: str,
     flat_number: str,
     purpose_detail: str,
 ) -> dict:
     """
-    Entry point. In the real pipeline this is called by the Gate Agent's
-    route_to_delivery_agent tool (or a message queue consumer).
+    Entry point. In the real pipeline this is called after the Gate Agent's
+    route_to_delivery_agent tool. Tools are DB-backed via the DeliveryContext.
 
     Args:
-        session_id:     Inherited from the Gate Agent's session
+        ctx:            DeliveryContext (tenant-scoped DB session + session id)
         visitor_name:   Visitor name (e.g. "Swiggy", "Rahul from Delhivery")
         flat_number:    Flat being delivered to
         purpose_detail: Free-text from the guard (e.g. "Blinkit grocery delivery")
     """
     from datetime import datetime
+    session_id = str(ctx.session_uuid)  # the real DB session id
     current_time = datetime.now().strftime("%H:%M")
 
     initial_message = (
@@ -198,6 +191,7 @@ def run_delivery_agent(
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
+            thinking={"type": "disabled"},
             system=SYSTEM_PROMPT,
             tools=DELIVERY_TOOLS,
             messages=messages,
@@ -212,7 +206,7 @@ def run_delivery_agent(
             for block in response.content:
                 if block.type == "tool_use":
                     print(f"  -> Tool call: {block.name}({json.dumps(block.input)})")
-                    result_str = execute_tool(block.name, block.input)
+                    result_str = execute_tool(block.name, block.input, ctx)
                     result_data = json.loads(result_str)
                     print(f"     <- Result: {json.dumps(result_data)}")
                     tool_results.append({
@@ -257,31 +251,7 @@ def _infer_outcome(messages: list) -> str:
 
 
 if __name__ == "__main__":
-    import uuid
-
-    print("\n--- Test 1: Known daytime delivery (Blinkit -> A-202) ---")
-    result = run_delivery_agent(
-        session_id=str(uuid.uuid4())[:8],
-        visitor_name="Blinkit Delivery",
-        flat_number="A-202",
-        purpose_detail="Blinkit grocery delivery",
-    )
-    print(f"\nOutcome: {result['outcome']}")
-
-    print("\n\n--- Test 2: Unknown courier -> should flag anomaly + route intercom ---")
-    result = run_delivery_agent(
-        session_id=str(uuid.uuid4())[:8],
-        visitor_name="Rajesh",
-        flat_number="A-202",
-        purpose_detail="Parcel from some local shop",
-    )
-    print(f"\nOutcome: {result['outcome']}")
-
-    print("\n\n--- Test 3: Known service but after hours, notify preference on ---")
-    result = run_delivery_agent(
-        session_id=str(uuid.uuid4())[:8],
-        visitor_name="Amazon Delivery",
-        flat_number="A-202",
-        purpose_detail="Amazon package delivery at 21:30",
-    )
-    print(f"\nOutcome: {result['outcome']}")
+    # Standalone demos were removed: run_delivery_agent now requires a
+    # DeliveryContext (a tenant-scoped DB session). Exercise it through the
+    # pipeline / API, or the backend/tests suite, instead.
+    print("run_delivery_agent requires a DeliveryContext — run it via the API or tests.")

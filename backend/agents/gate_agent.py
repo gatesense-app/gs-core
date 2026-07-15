@@ -19,21 +19,9 @@ import json
 import uuid
 from datetime import datetime
 
-import httpx
-import anthropic
-from dotenv import load_dotenv
-
 from backend.tools.gate_tools import execute_tool
-
-load_dotenv()
-
-# Corporate proxy intercepts TLS and re-signs with an internal CA that Python
-# doesn't trust. This disables verification for the Anthropic API calls only.
-# Replace with SSL_CERT_FILE pointing to your corporate CA cert for a proper fix.
-_http_client = httpx.Client(verify=False)
-client = anthropic.Anthropic(http_client=_http_client)
-
-MODEL = "claude-sonnet-4-6"
+from backend.config import MODEL
+from backend.llm import client  # shared client: TLS on by default + timeouts
 
 # ---------------------------------------------------------------------------
 # Tool definitions — Claude reads these to know what it's allowed to call.
@@ -157,7 +145,7 @@ Be concise in your final text response: one sentence stating what you decided an
 """
 
 
-def run_gate_agent(visitor_name: str, flat_number: str, purpose: str, purpose_detail: str) -> dict:
+def run_gate_agent(ctx, visitor_name: str, flat_number: str, purpose: str, purpose_detail: str) -> dict:
     """
     Entry point. Call this with the visitor details from the guard/kiosk.
 
@@ -167,7 +155,7 @@ def run_gate_agent(visitor_name: str, flat_number: str, purpose: str, purpose_de
       - final_message: Claude's last text response
       - message_history: the full conversation, so you can inspect every step
     """
-    session_id = str(uuid.uuid4())[:8]  # short ID for readability in dev
+    session_id = str(ctx.session_uuid)  # the real DB session id
     current_time = datetime.now().strftime("%H:%M")
 
     # -------------------------------------------------------------------------
@@ -204,6 +192,7 @@ def run_gate_agent(visitor_name: str, flat_number: str, purpose: str, purpose_de
         response = client.messages.create(
             model=MODEL,
             max_tokens=1024,
+            thinking={"type": "disabled"},
             system=SYSTEM_PROMPT,
             tools=GATE_TOOLS,
             messages=messages,
@@ -225,10 +214,10 @@ def run_gate_agent(visitor_name: str, flat_number: str, purpose: str, purpose_de
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    print(f"  → Tool call: {block.name}({json.dumps(block.input)})")
-                    result_str = execute_tool(block.name, block.input)
+                    print(f"  -> Tool call: {block.name}({json.dumps(block.input)})")
+                    result_str = execute_tool(block.name, block.input, ctx)
                     result_data = json.loads(result_str)
-                    print(f"    ← Result: {json.dumps(result_data)}")
+                    print(f"    <- Result: {json.dumps(result_data)}")
 
                     tool_results.append(
                         {
@@ -294,29 +283,7 @@ def _infer_outcome(messages: list) -> str:
 # Quick manual test — run this file directly to try the agent
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("\n--- Test 1: Known visitor with always_allow rule ---")
-    result = run_gate_agent(
-        visitor_name="Raju",
-        flat_number="A-202",
-        purpose="service",
-        purpose_detail="Plumbing repair",
-    )
-    print(f"\nOutcome: {result['outcome']}")
-
-    print("\n\n--- Test 2: Delivery with always_allow rule ---")
-    result = run_gate_agent(
-        visitor_name="Swiggy",
-        flat_number="B-101",
-        purpose="delivery",
-        purpose_detail="Food delivery",
-    )
-    print(f"\nOutcome: {result['outcome']}")
-
-    print("\n\n--- Test 3: Unknown visitor → should route to intercom ---")
-    result = run_gate_agent(
-        visitor_name="Vikram Nair",
-        flat_number="A-202",
-        purpose="guest",
-        purpose_detail="Friend visiting for dinner",
-    )
-    print(f"\nOutcome: {result['outcome']}")
+    # Standalone demos were removed: run_gate_agent now requires a GateContext
+    # (a tenant-scoped DB session). Exercise it through the pipeline / API,
+    # or the backend/tests suite, instead.
+    print("run_gate_agent requires a GateContext — run it via the API or tests.")
