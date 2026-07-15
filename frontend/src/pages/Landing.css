@@ -11,7 +11,8 @@
   --primary: #010d52;          /* navy — primary text, gradient start, borders, focus */
   --primary-end: #1ed5c5;      /* turquoise — accent / gradient end */
   --primary-solid: #010d52;
-  --accent: #1ed5c5;           /* turquoise — buttons, highlights */
+  --accent: #1ed5c5;           /* turquoise — badges, icons, highlights */
+  --accent-deep: #0fa697;      /* same hue, ~25% deeper — primary buttons */
   --accent-ink: #010d52;       /* readable text on a turquoise fill */
   --success: #10b981;
   --success-text: #047857;
@@ -68,16 +69,17 @@
   white-space: nowrap;
   transition: filter 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
-/* Navy fill + white text (17.8:1). A turquoise fill read washed-out beside the
-   navy headings and can never take white text (1.85:1). Turquoise stays the
-   accent elsewhere: eyebrow, live dot, feature icons, popular-plan ring. */
+/* Deep turquoise + navy text (5.9:1).
+   The light --accent read washed-out at button size, and navy dissolved into
+   the headings (the page is already mostly navy). This is the same hue as
+   --accent, just deeper, so it stays on-brand while actually reading as an
+   action. Light turquoise can never take white text (1.85:1), hence navy ink. */
 .lp-btn--primary {
-  background: var(--primary);
-  color: #fff;
-  box-shadow: 0 8px 20px -6px rgba(1, 13, 82, 0.45);
+  background: var(--accent-deep);
+  color: var(--accent-ink);
+  box-shadow: 0 8px 20px -6px rgba(15, 166, 151, 0.5);
 }
-/* A dark button has to get LIGHTER on hover — darkening navy is invisible. */
-.lp-btn--primary:hover { filter: brightness(1.6); }
+.lp-btn--primary:hover { filter: brightness(0.93); }
 .lp-btn--ghost {
   background: #fff;
   border-color: var(--border);
