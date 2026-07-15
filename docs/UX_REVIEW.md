@@ -18,9 +18,17 @@ now exist and are applied; Allow leads in the portal) and #16
 navy focus ring, the chip remove is a real `<button>` exposed to the a11y tree
 with a 44px hit area, and `:disabled` dims to 0.45 with `cursor: not-allowed`.
 
-**Still open** — #1 (responsive: the big one), #7 (Deny confirmation), #8 (DOM
-nesting), #12 (error placement / empty-vs-failed), #13 (no animation on live
-updates), #14, #15, #17, #18.
+**Fixed (second pass)** — #1 (responsive), #8 (DOM nesting), #15 (session id
+truncated). Measured at 375px: every route overflowed the page by 136–198px
+before; all now measure **0**, verified again at 768 and desktop.
+
+The dominant cause was not the tables — it was the **nav**: a no-wrap flex row
+whose email span alone was 183px, which pushed *every* route sideways, including
+the kiosk (just a form). Tables were the second layer, now contained.
+
+**Still open** — #7 (Deny confirmation), #12 (error placement / empty-vs-failed),
+#13 (no animation on live updates), #14 (markdown in trace), #17 (skip link),
+#18 (static title).
 
 ---
 

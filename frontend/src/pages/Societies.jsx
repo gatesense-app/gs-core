@@ -69,6 +69,7 @@ export default function Societies() {
         {error && <div style={ui.error}>{error}</div>}
       </form>
 
+      <div className="table-wrap">
       <table style={ui.table}>
         <thead>
           <tr>{['Name', 'Address'].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
@@ -82,6 +83,7 @@ export default function Societies() {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

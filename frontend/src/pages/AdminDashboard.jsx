@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { openSessionsSocket } from '../realtime'
 
@@ -44,6 +44,7 @@ function fmt(iso) {
 }
 
 export default function AdminDashboard() {
+  const nav = useNavigate()
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -73,7 +74,7 @@ export default function AdminDashboard() {
   }, [])
 
   return (
-    <div style={s.page}>
+    <div className="page-pad" style={s.page}>
       <div style={s.header}>
         <h1 className="page-title">Visitor Sessions</h1>
         <button className="btn btn--ghost" onClick={load}>Refresh</button>
@@ -85,24 +86,43 @@ export default function AdminDashboard() {
       )}
 
       {sessions.length > 0 && (
+        // Contained scroll: a 7-column table can't fit a phone, but the PAGE
+        // must never scroll sideways.
+        <div className="table-wrap">
         <table style={s.table}>
           <thead>
             <tr>
-              {['Session', 'Visitor', 'Flat', 'Purpose', 'Agents', 'Status', 'Time'].map(h =>
-                <th key={h} style={s.th}>{h}</th>
+              {[
+                ['Session', 'col-hide-sm'],   // raw UUID: widest column, least useful small
+                ['Visitor', ''],
+                ['Flat', ''],
+                ['Purpose', 'col-hide-sm'],
+                ['Agents', ''],
+                ['Status', ''],
+                ['Time', ''],
+              ].map(([h, cls]) =>
+                <th key={h} className={cls} style={s.th}>{h}</th>
               )}
             </tr>
           </thead>
           <tbody>
             {sessions.map(sess => (
-              <Link key={sess.session_id} to={`/session/${sess.session_id}`} style={{ display: 'contents' }}>
-                <tr style={s.tr}>
-                  <td style={{ ...s.td, fontFamily: 'monospace', color: 'var(--c-muted)', fontSize: 12 }}>
-                    {sess.session_id}
+              // The row was wrapped in <Link>, putting an <a> inside <tbody>
+              // around a <tr> — invalid nesting that React logged on every
+              // render and that display:contents can drop from the a11y tree.
+              // The row stays mouse-clickable; the real link lives in a cell,
+              // so keyboard users get a proper focusable target.
+                <tr key={sess.session_id} style={s.tr} onClick={() => nav(`/session/${sess.session_id}`)}>
+                  <td className="col-hide-sm" style={{ ...s.td, fontFamily: 'monospace', color: 'var(--c-muted)', fontSize: 12 }}>
+                    {sess.session_id.slice(0, 8)}…
                   </td>
-                  <td style={{ ...s.td, color: 'var(--c-text)', fontWeight: 500 }}>{sess.visitor_name}</td>
+                  <td style={{ ...s.td, fontWeight: 500 }}>
+                    <Link to={`/session/${sess.session_id}`} style={{ color: 'var(--c-link)' }}>
+                      {sess.visitor_name}
+                    </Link>
+                  </td>
                   <td style={s.td}>{sess.flat_number}</td>
-                  <td style={{ ...s.td, color: 'var(--c-sub)' }}>{sess.purpose}</td>
+                  <td className="col-hide-sm" style={{ ...s.td, color: 'var(--c-sub)' }}>{sess.purpose}</td>
                   <td style={s.td}>
                     <div style={s.agents}>
                       {[...new Set(sess.decision_trace.map(t => t.agent))].map(a =>
@@ -113,10 +133,10 @@ export default function AdminDashboard() {
                   <td style={s.td}><span style={s.badge(sess.status)}>{sess.status}</span></td>
                   <td style={{ ...s.td, ...s.time }}>{fmt(sess.entry_time)}</td>
                 </tr>
-              </Link>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )

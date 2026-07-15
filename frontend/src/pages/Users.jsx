@@ -99,6 +99,7 @@ export default function Users() {
         {error && <div style={ui.error}>{error}</div>}
       </form>
 
+      <div className="table-wrap">
       <table style={ui.table}>
         <thead>
           <tr>{['Email', 'Name', 'Role'].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
@@ -117,6 +118,7 @@ export default function Users() {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

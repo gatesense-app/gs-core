@@ -14,12 +14,6 @@ import SessionDetail from './pages/SessionDetail'
 import Portal from './pages/Portal'
 import Notifications from './pages/Notifications'
 
-const navBar = {
-  display: 'flex', alignItems: 'center', gap: 22,
-  padding: '14px 28px', borderBottom: `1px solid ${colors.border}`,
-  background: 'var(--c-nav-bg)', backdropFilter: 'blur(10px)',
-  position: 'sticky', top: 0, zIndex: 50,
-}
 const logoLink = { display: 'flex', alignItems: 'center' }
 const logoImg = { height: 26, width: 'auto', display: 'block' }
 const navLink = { fontSize: 14, color: colors.sub, textDecoration: 'none' }
@@ -38,13 +32,18 @@ function AppNav() {
   if (pathname === '/' || pathname === '/login') return null
 
   return (
-    <nav style={navBar}>
+    <nav className="app-nav">
       <Link to="/home" style={logoLink}><img src={logoUrl} alt="GateSense" style={logoImg} /></Link>
       {(LINKS[user?.role] || []).map(([to, label]) => (
-        <Link key={to} to={to} style={pathname === to ? { ...navLink, color: colors.text } : navLink}>{label}</Link>
+        <Link
+          key={to}
+          to={to}
+          aria-current={pathname === to ? 'page' : undefined}
+          style={pathname === to ? { ...navLink, color: colors.text, fontWeight: 600 } : navLink}
+        >{label}</Link>
       ))}
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
-        {user && <span style={{ fontSize: 13, color: colors.muted }}>{user.email} · {user.role}</span>}
+      <div className="app-nav__right">
+        {user && <span className="app-nav__user">{user.email} · {user.role}</span>}
         {user && <button onClick={logout} className="btn btn--ghost btn--sm" style={{ border: 'none' }}>Sign out</button>}
       </div>
     </nav>

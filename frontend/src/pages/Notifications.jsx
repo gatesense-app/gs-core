@@ -62,7 +62,7 @@ export default function Notifications() {
   const failed = summary.failed || 0
 
   return (
-    <div style={s.page}>
+    <div className="page-pad" style={s.page}>
       <div style={s.header}>
         <h1 className="page-title">Notification health</h1>
         <button className="btn btn--ghost" onClick={load}>Refresh</button>
@@ -97,6 +97,7 @@ export default function Notifications() {
       )}
 
       {rows.length > 0 && (
+        <div className="table-wrap">
         <table style={s.table}>
           <thead>
             <tr>
@@ -122,6 +123,7 @@ export default function Notifications() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )
