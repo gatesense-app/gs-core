@@ -11,8 +11,7 @@
   --primary: #010d52;          /* navy — primary text, gradient start, borders, focus */
   --primary-end: #1ed5c5;      /* turquoise — accent / gradient end */
   --primary-solid: #010d52;
-  --accent: #1ed5c5;           /* turquoise — badges, icons, highlights */
-  --accent-deep: #0fa697;      /* same hue, ~25% deeper — primary buttons */
+  --accent: #1ed5c5;           /* turquoise — buttons, badges, icons, highlights */
   --accent-ink: #010d52;       /* readable text on a turquoise fill */
   --success: #10b981;
   --success-text: #047857;
@@ -59,7 +58,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 20px;
+  /* 20px of side padding made the label feel shrink-wrapped; a primary action
+     should look deliberately sized, not squeezed to fit its text. */
+  padding: 12px 26px;
   min-height: 44px;
   border-radius: 10px;
   font-size: 14px;
@@ -69,24 +70,22 @@
   white-space: nowrap;
   transition: filter 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
-/* Deep turquoise + navy text (5.9:1).
-   The light --accent read washed-out at button size, and navy dissolved into
-   the headings (the page is already mostly navy). This is the same hue as
-   --accent, just deeper, so it stays on-brand while actually reading as an
-   action. Light turquoise can never take white text (1.85:1), hence navy ink. */
+/* Brand turquoise + navy ink (9.6:1). White ink here would be 1.85:1, so this
+   fill can only ever carry dark ink. */
 .lp-btn--primary {
-  background: var(--accent-deep);
+  background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: 0 8px 20px -6px rgba(15, 166, 151, 0.5);
+  box-shadow: 0 8px 20px -6px rgba(30, 213, 197, 0.5);
 }
-.lp-btn--primary:hover { filter: brightness(0.93); }
+.lp-btn--primary:hover { filter: brightness(1.05); }
 .lp-btn--ghost {
   background: #fff;
   border-color: var(--border);
   color: var(--text-strong);
 }
 .lp-btn--ghost:hover { border-color: var(--primary); color: var(--primary); }
-.lp-btn--lg { padding: 13px 26px; font-size: 15px; }
+/* The hero CTA is the biggest ask on the page — give it room to look like it. */
+.lp-btn--lg { padding: 15px 34px; font-size: 15px; min-height: 52px; }
 .lp-btn:active { transform: scale(0.97); }
 
 .lp-link-btn {
@@ -146,7 +145,9 @@
 .lp-nav-actions {
   display: none;
   align-items: center;
-  gap: 12px;
+  /* "Sign in" only had 8px of its own padding + a 12px gap, so its text nearly
+     touched the Get started button. */
+  gap: 20px;
   margin-left: auto;
 }
 .lp-nav-toggle {
@@ -214,8 +215,11 @@
 .lp-hero-cta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 40px;
+  /* 12px between two 44px+ buttons read as one crowded block. 16px lets them
+     be two distinct choices; 32px below separates them from the stats row. */
+  gap: 16px;
+  margin-top: 32px;
+  margin-bottom: 44px;
 }
 .lp-hero-stats {
   display: flex;

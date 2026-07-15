@@ -29,17 +29,12 @@
   --c-accent-border: rgba(30, 213, 197, 0.5);
   --c-link: #010d52;
 
-  /* Deeper shade of the brand turquoise, for primary buttons.
-     #1ed5c5 is the light/minty end of this hue: as a button fill it read
-     washed-out, and it can never take white text (1.85:1). Navy was tried too,
-     but the page is already mostly navy — headings, logo, body — so a navy CTA
-     dissolved into it. This sits between the two: same hue as --c-accent, ~25%
-     deeper, so it carries navy text at 5.9:1 and still pops against both the
-     white page and the navy headings. Not a new colour — a shade of one. */
-  --c-accent-deep: #0fa697;
-
-  /* Primary button: deep turquoise + navy text (5.9:1). */
-  --c-btn-bg: var(--c-accent-deep);
+  /* Primary button: brand turquoise + navy text (9.6:1).
+     Note if you're tempted to swap the fill: white ink on this is 1.85:1, so it
+     can only ever take dark ink. Navy fill was tried and dissolved into the
+     headings (the page is already mostly navy). The fill is fine — what it
+     needed was room to breathe, not a different colour. */
+  --c-btn-bg: #1ed5c5;
   --c-btn-text: #010d52;
 
   --c-input-bg: #ffffff;
@@ -89,7 +84,9 @@ button { cursor: pointer; font-family: inherit; }
   justify-content: center;
   gap: 8px;
   min-height: 44px;
-  padding: 10px 18px;
+  /* Matches the landing's .lp-btn: 18px of side padding shrink-wrapped the
+     label. */
+  padding: 12px 24px;
   border-radius: 8px;
   border: 1px solid transparent;
   font-family: inherit;
