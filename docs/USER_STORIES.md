@@ -70,20 +70,24 @@ Consequences, in order of importance:
    without generation, import stops being a convenience and becomes the primary
    way a society gets set up. That raises E3's priority.
 
-### Open questions from D2/D3
+### Follow-ups from D2/D3 (settled)
 
-- **Q1 — Where does a flat's floor come from?** Recommend an explicit `floor`
-  column in CSV and an explicit field in the UI. The alternative (derive from the
-  code) needs a stated, enforced naming convention per society, and breaks the
-  moment one society names flats differently.
-- **Q2 — Is `flats_per_floor` a rule or a hint?** Recommend a hint: draw the grid
-  and warn on mismatch, don't reject. A real property has a shop on the ground
-  floor and a penthouse on top.
-- **Q3 — With several residents per flat (D3), who does the intercom agent
-  contact?** Today `.first()` silently picks one — with a family on `A-101`, the
-  notification may reach the wrong person. Recommend a **primary contact** per
-  flat, defaulting to the first imported, with the others visible on the flat
-  page. This is an agent-behaviour change and needs its own eval scenario.
+| # | Question | Decision |
+|---|---|---|
+| **Q1** | Where does a flat's floor come from? | **Stored, never parsed** — `flats.floor` is explicit; CSV carries a `floor` column and the UI asks for it |
+| **Q2** | Is `flats_per_floor` a rule or a hint? | **A hint** — draw the grid, warn on mismatch, never reject |
+| **Q3** | Who does the intercom agent contact? | **A primary contact per flat**, defaulting to the first imported |
+
+Why each matters:
+
+- **Q1** — a typed `A-101` carries no floor. Deriving it would need every society
+  to name flats identically (`A-1201` on floor 12? `A-G3` on the ground?), so a
+  single differently-named society would silently mis-place its whole layout.
+  Storing it makes the grid a fact rather than a guess.
+- **Q2** — a declared 10 × 4 is a drawing aid, not a truth. Real properties have
+  a shop on the ground floor and a penthouse on top; the system warns and draws
+  what actually exists.
+- **Q3** — this is the one that can change a live gate decision. See **E6-S3**.
 
 ---
 
@@ -194,9 +198,14 @@ wing, flat_number, floor, resident_name, phone, is_primary_contact (opt)
 
 - `code` is composed as `{wing}-{flat_number}` — the file states the parts, the
   system never invents them.
+- `floor` is required (**Q1**) — a typed code carries no floor, and the layout
+  can't place a flat without one.
 - **Several rows may share a flat** (D3): three rows with wing `A`, flat `101`
   create one flat with three residents. `is_primary_contact` marks who the
-  intercom agent talks to (**Q3**); absent it, the first row for that flat wins.
+  intercom agent talks to; absent it, **the first row for that flat wins**
+  (**Q3**). Two rows both claiming primary for one flat is a validation error.
+- A `floor` that contradicts an existing flat's floor is a validation error, not
+  a silent overwrite.
 - An unknown `wing` is an error, not an implicit create — otherwise a typo
   (`"a"` vs `"A"`) silently spawns a phantom wing.
 - Flats that don't exist yet **are** created by the import (this is the bulk
@@ -246,9 +255,10 @@ Per **D2** this **declares the grid** — it does **not** create flats.
 - The code is **never generated or inferred** — I typed it.
 - Flat codes are unique within a society; a duplicate is rejected with a clear
   message.
-- The flat appears on the layout at the floor I gave it.
-- **Open (Q2):** entering more flats on a floor than the wing declares should
-  warn, not block.
+- The flat appears on the layout at the floor I gave it (**Q1** — floor is
+  stored, never inferred from the code).
+- Entering more flats on a floor than the wing declares **warns and saves**
+  (**Q2** — the declared shape is a hint).
 
 ### E4-S3 — Edit a wing after the fact
 > **As a** society admin, **I want** to correct a wing, **so that** a typo
@@ -334,20 +344,24 @@ invisible; with a family it means **notifying an arbitrary person**.
 
 **Acceptance**
 - Given a flat with several residents, when a visitor arrives, then the agent
-  contacts the flat's **primary contact** (**Q3**), deterministically — never
-  "whichever row came back first".
-- A flat with residents but no primary contact behaves predictably (defined
-  fallback), and the flat page surfaces that it needs one.
+  contacts the flat's **primary contact** — deterministically, never "whichever
+  row the database returned first".
+- **Exactly one primary contact per flat** is enforced; the first resident
+  imported/added for a flat becomes primary by default (**Q3**), and an admin can
+  change it from the flat page.
+- A flat whose primary contact is removed promotes another deterministically —
+  a flat with residents is never left uncontactable.
 - Standing rules and delivery preferences are resolved **per flat**, not per
   resident — otherwise two residents could hold contradictory rules for the same
-  door. **Open:** does that mean moving `standing_rules` /
-  `delivery_preferences` off `residents` and onto `flats`? Likely yes, and it's a
-  migration.
-- The escalation chain (backup contact) still works: **Open** — is the backup now
-  "another resident of the same flat" rather than a linked resident?
-- **The eval must be extended**: a shared-flat scenario asserting the primary
-  contact is the one notified. `.first()` behaviour would pass today's 21
-  scenarios silently, because none of them share a flat.
+  door. **Open:** this likely means moving `standing_rules` /
+  `delivery_preferences` off `residents` onto `flats`, which is a migration and a
+  change to every agent tool that reads them.
+- The escalation chain still works. **Open:** is the backup contact now "another
+  resident of this flat" rather than a linked `backup_contact_id`?
+- **The eval gains a shared-flat scenario** asserting the primary contact is the
+  one notified. Today's 21 scenarios all use single-resident flats, so a
+  regression to `.first()` would pass them silently — the eval is the only thing
+  standing between this change and a wrong-person notification.
 
 ### E6-S2 — Manage residents from the flat
 > **As an** admin, **I want** to add/edit/remove a resident on the flat page,
@@ -392,6 +406,10 @@ With D1–D6 settled, the shape is:
 5. **E3 (CSV)** — the real setup path now that codes aren't generated.
 6. **E5** (layout view), then **E6-S1/S2** (flat detail).
 
-**Answer Q1 before step 2** — whether `flats.floor` is stored or derived decides
-the schema and the CSV header, and it's cheap to get right now and expensive to
-change once societies have imported data.
+All decisions (D1–D6) and follow-ups (Q1–Q3) are settled, so nothing here is
+blocked on an answer.
+
+The one to keep honest is **step 4**: E6-S3 is the only item that can change what
+happens at a real gate. Everything else is additive — new tables, new screens,
+new endpoints — and can't break a decision that's already working. Ship the
+shared-flat eval scenario *with* it, not after.
