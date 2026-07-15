@@ -207,7 +207,11 @@
   letter-spacing: -0.02em;
   margin-bottom: 18px;
 }
-.lp-hero-sub {
+/* Scoped for the same reason as .lp-plan-features: this is a <p>, and
+   `.landing p { margin: 0 }` (0,1,1) beats a bare `.lp-hero-sub` (0,1,0), so
+   this margin-bottom was silently computing to 0. It collapses with
+   .lp-hero-cta's 32px margin-top (plain block flow), so the larger wins. */
+.landing .lp-hero-sub {
   font-size: 16px;
   max-width: 56ch;
   margin-bottom: 28px;
@@ -419,7 +423,17 @@
 .lp-plan-price { font-size: 30px; font-weight: 800; color: var(--text-strong); }
 .lp-plan-price span { font-size: 14px; font-weight: 500; color: var(--text-faint); margin-left: 2px; }
 .lp-plan-tag { font-size: 13px; color: var(--text-faint); margin: 8px 0 20px; }
-.lp-plan-features { display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; flex: 1; }
+/* Scoped with .landing on purpose: this is a <ul>, and the generic
+   `.landing ul { margin: 0 }` reset above has specificity (0,1,1) — which beats
+   a bare `.lp-plan-features` (0,1,0). Unscoped, the margin-bottom silently
+   computed to 0 and every plan's CTA sat flush against the last feature. */
+.landing .lp-plan-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 28px;
+  flex: 1;
+}
 .lp-plan-features li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text); }
 .lp-plan-check { color: var(--success-text); flex-shrink: 0; }
 .lp-plan-cta { width: 100%; }
