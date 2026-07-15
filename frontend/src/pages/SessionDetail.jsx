@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
+import { useAuth } from '../auth'
 import { openSessionsSocket } from '../realtime'
 
 const AGENT_COLOR = { gate: '#818cf8', delivery: '#34d399', intercom: '#f472b6' }
@@ -48,6 +49,19 @@ const s = {
   },
   ts: { fontSize: 11, color: 'var(--c-muted)', marginTop: 6 },
 
+  // Audit (admin-only): escalations + notification deliveries
+  auditRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16,
+    padding: '10px 0', borderBottom: '1px solid var(--c-row-border)',
+  },
+  auditMain: { fontSize: 13, color: 'var(--c-text)' },
+  auditMeta: { fontSize: 11, color: 'var(--c-muted)', marginTop: 3 },
+  pill: (color) => ({
+    display: 'inline-block', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+    background: color + '22', color, border: `1px solid ${color}44`, whiteSpace: 'nowrap',
+  }),
+  none: { fontSize: 13, color: 'var(--c-muted)' },
+
   // Reply box
   replyBox: { display: 'flex', gap: 10, marginTop: 16 },
   replyInput: {
@@ -78,11 +92,18 @@ function fmt(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+const NOTIF_COLOR = { sent: '#22c55e', delivered: '#22c55e', failed: '#ef4444' }
+
 export default function SessionDetail() {
   const { id } = useParams()
+  const { user } = useAuth()
   const [session, setSession] = useState(null)
+  const [audit, setAudit] = useState(null)
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
+
+  // Only society/platform admins may read the audit trail.
+  const isAdmin = user?.role === 'society_admin' || user?.role === 'platform_admin'
 
   async function load() {
     try {
@@ -98,6 +119,17 @@ export default function SessionDetail() {
     const t = setInterval(load, 10000)  // fallback in case the socket drops
     return () => { stop(); clearInterval(t) }
   }, [id])
+
+  // Escalations / notification deliveries live in their own tables, so they need
+  // a second call. Re-fetched when the session resolves so late escalations show.
+  useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    apiFetch(`/admin/sessions/${id}/audit`)
+      .then(a => { if (!cancelled) setAudit(a) })
+      .catch(() => { /* non-fatal: the trace above still renders */ })
+    return () => { cancelled = true }
+  }, [id, isAdmin, session?.status])
 
   async function sendReply(e) {
     e.preventDefault()
@@ -175,6 +207,43 @@ export default function SessionDetail() {
           ))}
         </div>
       </div>
+
+      {/* Escalations + notification deliveries — the evidence behind the trace.
+          Admin-only; the backend gates /admin/* to society_admin+. */}
+      {isAdmin && audit && (
+        <>
+          {audit.escalations.length > 0 && (
+            <div style={s.card}>
+              <div style={s.sectionTitle}>Escalations</div>
+              {audit.escalations.map(e => (
+                <div key={e.id} style={s.auditRow}>
+                  <div>
+                    <div style={s.auditMain}>{e.reason}</div>
+                    <div style={s.auditMeta}>to {e.escalated_to} · {fmt(e.created_at)}</div>
+                  </div>
+                  <span style={s.pill(e.status === 'open' ? '#f97316' : '#22c55e')}>{e.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={s.card}>
+            <div style={s.sectionTitle}>Notifications</div>
+            {audit.notifications.length === 0 && <div style={s.none}>No notifications sent.</div>}
+            {audit.notifications.map(n => (
+              <div key={n.id} style={s.auditRow}>
+                <div>
+                  <div style={s.auditMain}>
+                    {n.resident_name || 'Resident'}{n.flat_number ? ` · ${n.flat_number}` : ''}
+                  </div>
+                  <div style={s.auditMeta}>via {n.channel} · {fmt(n.created_at)}</div>
+                </div>
+                <span style={s.pill(NOTIF_COLOR[n.status] || '#64748b')}>{n.status}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Conversation (intercom sessions) */}
       {session.conversation_history.length > 0 && (

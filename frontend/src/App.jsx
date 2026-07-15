@@ -12,6 +12,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import GuardKiosk from './pages/GuardKiosk'
 import SessionDetail from './pages/SessionDetail'
 import Portal from './pages/Portal'
+import Notifications from './pages/Notifications'
 
 const navBar = {
   display: 'flex', alignItems: 'center', gap: 22,
@@ -25,8 +26,8 @@ const navLink = { fontSize: 14, color: colors.sub, textDecoration: 'none' }
 
 // Which nav links each role sees.
 const LINKS = {
-  platform_admin: [['/societies', 'Societies'], ['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions']],
-  society_admin: [['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/kiosk', 'Kiosk']],
+  platform_admin: [['/societies', 'Societies'], ['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications']],
+  society_admin: [['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications'], ['/kiosk', 'Kiosk']],
   guard: [['/kiosk', 'Guard Kiosk']],
   resident: [['/portal', 'Home']],
 }
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/residents" element={<Protected roles={['platform_admin', 'society_admin']}><Residents /></Protected>} />
           <Route path="/users" element={<Protected roles={['platform_admin', 'society_admin']}><Users /></Protected>} />
           <Route path="/dashboard" element={<Protected roles={['platform_admin', 'society_admin']}><AdminDashboard /></Protected>} />
+          <Route path="/notifications" element={<Protected roles={['platform_admin', 'society_admin']}><Notifications /></Protected>} />
           <Route path="/kiosk" element={<Protected roles={['platform_admin', 'society_admin', 'guard']}><GuardKiosk /></Protected>} />
           <Route path="/session/:id" element={<Protected><SessionDetail /></Protected>} />
           <Route path="/portal" element={<Protected roles={['resident']}><Portal /></Protected>} />

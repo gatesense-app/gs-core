@@ -39,7 +39,7 @@ from backend.deps import (
 )
 from backend.pipeline import handle_resident_reply, handle_visitor_entry, serialize
 from backend.realtime import manager
-from backend.routers import auth, portal, residents, societies, users, visitors
+from backend.routers import admin, auth, portal, residents, societies, users, visitors
 from backend.routers.common import parse_uuid
 from backend.security import decode_access_token
 
@@ -68,6 +68,7 @@ app.include_router(residents.router)
 app.include_router(users.router)
 app.include_router(visitors.router)
 app.include_router(portal.router)  # resident self-service (Phase 5)
+app.include_router(admin.router)   # notification health + session audit (Phase 6)
 
 
 # ---------------------------------------------------------------------------
