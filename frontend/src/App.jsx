@@ -15,6 +15,7 @@ import Portal from './pages/Portal'
 import Notifications from './pages/Notifications'
 import Layout from './pages/Layout'
 import FlatDetail from './pages/FlatDetail'
+import ImportResidents from './pages/ImportResidents'
 
 const logoLink = { display: 'flex', alignItems: 'center' }
 const logoImg = { height: 26, width: 'auto', display: 'block' }
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="/societies" element={<Protected roles={['platform_admin']}><Societies /></Protected>} />
           <Route path="/layout" element={<Protected roles={['platform_admin', 'society_admin']}><Layout /></Protected>} />
           <Route path="/flat/:id" element={<Protected roles={['platform_admin', 'society_admin']}><FlatDetail /></Protected>} />
+          <Route path="/import" element={<Protected roles={['platform_admin', 'society_admin']}><ImportResidents /></Protected>} />
           <Route path="/residents" element={<Protected roles={['platform_admin', 'society_admin']}><Residents /></Protected>} />
           <Route path="/users" element={<Protected roles={['platform_admin', 'society_admin']}><Users /></Protected>} />
           <Route path="/dashboard" element={<Protected roles={['platform_admin', 'society_admin']}><AdminDashboard /></Protected>} />

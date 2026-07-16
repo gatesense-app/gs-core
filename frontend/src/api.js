@@ -14,8 +14,14 @@ export function writeAuth(auth) {
   else localStorage.removeItem(STORAGE_KEY)
 }
 
-export async function apiFetch(path, { method = 'GET', body, auth = true } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
+// `contentType` / `responseType` exist for the CSV import (E3): it posts a raw
+// text/csv body and downloads a text/csv template, so JSON isn't universal here.
+// Both default to JSON, so every existing caller is unaffected.
+export async function apiFetch(
+  path,
+  { method = 'GET', body, auth = true, contentType = 'application/json', responseType = 'json' } = {},
+) {
+  const headers = { 'Content-Type': contentType }
   if (auth) {
     const a = readAuth()
     if (a?.token) headers.Authorization = `Bearer ${a.token}`
@@ -23,7 +29,9 @@ export async function apiFetch(path, { method = 'GET', body, auth = true } = {})
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
-    body: body != null ? JSON.stringify(body) : undefined,
+    // A raw (non-JSON) body is already a string — stringifying it again would
+    // wrap the whole CSV in quotes and escape every newline.
+    body: body != null ? (contentType === 'application/json' ? JSON.stringify(body) : body) : undefined,
   })
   if (!res.ok) {
     // The API returns a uniform {error: {code, message}}; fall back to older
@@ -43,5 +51,5 @@ export async function apiFetch(path, { method = 'GET', body, auth = true } = {})
     throw err
   }
   if (res.status === 204) return null
-  return res.json()
+  return responseType === 'text' ? res.text() : res.json()
 }
