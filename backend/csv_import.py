@@ -317,15 +317,25 @@ def apply_plan(db, society_id, plan: dict) -> None:
         db.flush()
         resident_by_line[vr["line"]] = resident
 
+    # The first row for each flat, in file order — Q3's tiebreak when no row is
+    # marked. It has to be explicit: rows imported in one transaction share a
+    # created_at, and gen_random_uuid() isn't monotonic, so ensure_primary's
+    # (created_at, id) order would pick an arbitrary row for a brand-new flat.
+    first_line = {}
+    for vr in plan["rows"]:
+        first_line.setdefault(vr["code"], vr["line"])
+    new_flats = set(plan["flats_to_create"])
+
     # 3. One primary per touched flat, deterministically (E6-S3 / Q3).
     for code in plan["flat_floor"]:
         line = plan["flat_primary_line"].get(code)
+        if line is None and code in new_flats:
+            # Brand-new flat, nobody marked: the first row wins (Q3).
+            line = first_line[code]
         if line is not None:
-            # An explicit is_primary_contact row wins: promote that resident.
             resolve.claim_primary(db, resident_by_line[line])
         else:
-            # Absent a mark, guarantee a primary exists (first row wins for a
-            # brand-new flat; an existing flat keeps the primary it had).
+            # An existing flat with no marked row keeps the primary it had.
             resolve.ensure_primary(db, society_id, code)
 
 
