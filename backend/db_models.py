@@ -18,9 +18,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -47,16 +49,100 @@ class Society(Base):
     created_at = _created_at()
 
 
+class Wing(Base):
+    """
+    A wing/building: the *declared shape* of a slice of the property (D6).
+
+    `floors` and `flats_per_floor` describe the grid the UI draws; they create no
+    flats and are only a hint (Q2). Real properties put shops on the ground floor
+    and a penthouse on top, so a mismatch warns and saves — it never rejects.
+    Total flats is always counted from `flats`, never `floors * flats_per_floor`.
+    """
+
+    __tablename__ = "wings"
+    __table_args__ = (
+        # The name is part of every flat code, so a duplicate would make codes ambiguous.
+        UniqueConstraint("society_id", "name", name="uq_wings_society_name"),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(64), nullable=False)
+    floors = Column(Integer, nullable=False)
+    flats_per_floor = Column(Integer, nullable=False)
+    created_at = _created_at()
+
+
+class Flat(Base):
+    """
+    A real flat (D1). `code` is typed or imported, never generated (D2).
+
+    Two deliberate denormalizations:
+      - `code` is stored even though it's "{wing}-{flat_number}" at creation time,
+        so the guard's typed string resolves in one indexed lookup, and so a wing
+        rename can't silently rewrite history (E4-S3).
+      - `floor` is stored, never parsed from the code (Q1) — a typed `A-101`
+        carries no floor, and the first society that names flats differently
+        would break any derivation.
+    """
+
+    __tablename__ = "flats"
+    __table_args__ = (
+        UniqueConstraint("society_id", "code", name="uq_flats_society_code"),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    wing_id = Column(_UUID, ForeignKey("wings.id", ondelete="CASCADE"), nullable=False)
+    flat_number = Column(String(32), nullable=False)
+    floor = Column(Integer, nullable=False)
+    code = Column(String(64), nullable=False)
+    # E6-S3: rules belong to the door, not to whoever happens to live behind it —
+    # two residents must not hold contradictory rules for one flat.
+    #
+    # Deliberately NULLABLE, unlike the residents columns: NULL means "not set,
+    # fall back to the primary resident", which is different from [] meaning
+    # "explicitly no rules". A [] default would make a society's first reconcile
+    # silently overrule every resident's real rules — a gate behaviour change
+    # delivered by a migration.
+    standing_rules = Column(JSONB)
+    delivery_preferences = Column(JSONB)
+    created_at = _created_at()
+
+
 class Resident(Base):
+    """
+    A person behind a flat. Several per flat is normal (D3), so exactly one of
+    them is the flat's primary contact — the person the agents actually reach.
+    """
+
     __tablename__ = "residents"
+    __table_args__ = (
+        # At most one primary per flat, enforced by Postgres rather than by
+        # hope. Keyed on flat_number (not flat_id) because it must hold in both
+        # worlds: today nearly every resident has flat_id NULL, and the agents
+        # resolve on this string until the layout is reconciled.
+        Index(
+            "uq_residents_primary_per_flat",
+            "society_id", "flat_number",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
+    )
 
     id = _pk()
     society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
     flat_number = Column(String(32), nullable=False)
+    # Nullable: the existing free-text residents are linked by E4-S4 (reconcile).
+    # Requiring it now would break the seed and every existing test.
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="SET NULL"))
     name = Column(String(200), nullable=False)
     phone = Column(String(32))
-    backup_contact_id = Column(_UUID, ForeignKey("residents.id", ondelete="SET NULL"))
+    # E6-S3 / Q3: the flat's contact, defaulting to the first resident added.
+    # Never rely on "whichever row the database returned first".
+    is_primary = Column(Boolean, nullable=False, server_default=text("false"))
     # e.g. [{"type": "always_allow", "match": "Swiggy"}, {"type": "never_allow", "after": "21:00"}]
+    # A flat's own rules win over these when set (see tools/resolve.py).
     standing_rules = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     # e.g. {"auto_log_daytime": true, "notify_after_hours": true}
     delivery_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
@@ -157,6 +243,8 @@ class NotificationDeliveryLog(Base):
 # Tables that get RLS. `societies` filters on its own `id`; the rest on society_id.
 TENANT_TABLES = [
     "societies",
+    "wings",
+    "flats",
     "residents",
     "users",
     "visitors",

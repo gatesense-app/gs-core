@@ -119,6 +119,10 @@ def seed() -> None:
                         flat_number=f"{block}-{flat}",
                         name=f"{rng.choice(_FIRST)} {rng.choice(_LAST)}",
                         phone=f"+9198{rng.randint(10000000, 99999999)}",
+                        # One resident per flat here, so each is their flat's
+                        # contact (E6-S3). Resolution would fall back to them
+                        # anyway, but a seeded flat should state it outright.
+                        is_primary=True,
                         standing_rules=_standing_rules(rng),
                         delivery_preferences=_delivery_prefs(rng),
                     )

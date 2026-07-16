@@ -12,7 +12,8 @@ Data sources:
                                    against this society's known-service visitors
   - get_delivery_pattern_history→ visitor_sessions (real runtime deliveries) +
                                    the society's known delivery visitors
-  - get_resident_delivery_preferences → residents.delivery_preferences
+  - get_resident_delivery_preferences → the flat's preferences, else the
+                                   primary contact's (tools/resolve.py)
   - flag_anomaly                → inserts an escalations row
   - create_visitor_log          → stamps the session row auto_approved
 """
@@ -23,6 +24,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 
 from backend import db_models as m
+from backend.tools import resolve
 
 # Domain knowledge (not tenant data): common Indian delivery brands. Used as a
 # first-pass classifier; anything not here is cross-checked against the society's
@@ -113,10 +115,14 @@ def get_delivery_pattern_history(ctx: DeliveryContext, flat_number: str) -> dict
 
 
 def get_resident_delivery_preferences(ctx: DeliveryContext, flat_number: str) -> dict:
-    """Read the resident's delivery_preferences for this flat (RLS-scoped)."""
-    resident = ctx.db.execute(
-        select(m.Resident).where(m.Resident.flat_number == flat_number)
-    ).scalars().first()
+    """
+    Delivery preferences for this flat (E6-S3: per flat, not per resident).
+
+    The flat's own preferences win when set; otherwise the primary contact's
+    apply — the same person the gate and intercom legs resolve to.
+    """
+    resolved = resolve.resolve_rules(ctx.db, ctx.society_id, flat_number)
+    resident = resolved["resident"]
 
     if resident is None:
         return {
@@ -126,7 +132,7 @@ def get_resident_delivery_preferences(ctx: DeliveryContext, flat_number: str) ->
             "after_hours_threshold": "21:00",
         }
 
-    prefs = resident.delivery_preferences or {}
+    prefs = resolved["delivery_preferences"] or {}
     return {
         "found": True,
         "resident_name": resident.name,

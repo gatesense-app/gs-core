@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 
 from backend import db_models as m
+from backend.tools import resolve
 
 
 class GateContext:
@@ -45,30 +46,39 @@ def lookup_visitor_history(ctx: GateContext, visitor_name: str, flat_number: str
 
 
 def get_resident_rules(ctx: GateContext, flat_number: str) -> dict:
-    """Standing rules + delivery preferences for a flat."""
-    resident = ctx.db.execute(
-        select(m.Resident).where(m.Resident.flat_number == flat_number)
-    ).scalars().first()
+    """
+    Standing rules + delivery preferences for a flat.
+
+    Resolved per flat, not per resident (E6-S3): the flat's own rules win when
+    set, otherwise the primary contact's apply. Two residents can't hold
+    contradictory rules for one door.
+    """
+    resolved = resolve.resolve_rules(ctx.db, ctx.society_id, flat_number)
+    resident = resolved["resident"]
 
     if resident is None:
         return {
-            "standing_rules": [],
-            "delivery_preferences": {"auto_log_daytime": False, "notify_after_hours": True},
+            "standing_rules": resolved["standing_rules"],
+            "delivery_preferences": resolved["delivery_preferences"]
+            or {"auto_log_daytime": False, "notify_after_hours": True},
             "resident_name": "Unknown Resident",
         }
 
     return {
-        "standing_rules": resident.standing_rules or [],
-        "delivery_preferences": resident.delivery_preferences or {},
+        "standing_rules": resolved["standing_rules"],
+        "delivery_preferences": resolved["delivery_preferences"],
         "resident_name": resident.name,
     }
 
 
 def get_flat_details(ctx: GateContext, flat_number: str) -> dict:
-    """Contact info for the flat so downstream agents know who to reach."""
-    resident = ctx.db.execute(
-        select(m.Resident).where(m.Resident.flat_number == flat_number)
-    ).scalars().first()
+    """
+    Contact info for the flat so downstream agents know who to reach.
+
+    This is the flat's primary contact (Q3) — with a family behind one door,
+    the alternative was notifying whoever the database happened to return.
+    """
+    resident = resolve.primary_resident(ctx.db, ctx.society_id, flat_number)
 
     if resident is None:
         return {"flat_number": flat_number, "resident_name": "Unknown", "contact": None}

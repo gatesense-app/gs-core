@@ -24,18 +24,21 @@ def _now():
 
 @pytest.fixture
 def society():
-    """A-101 has a backup contact (A-102); A-103 has none."""
+    """
+    A-101 is a shared flat: Priya is the primary contact, Rohit is the rest of
+    the household and therefore the backup (E6-S3). A-103 has one resident and
+    so has nobody to escalate to.
+    """
     with system_session() as db:
         db.execute(text("DELETE FROM societies WHERE name = 'TIMEOUT-Test'"))
         soc = m.Society(name="TIMEOUT-Test")
         db.add(soc)
         db.flush()
-        backup = m.Resident(society_id=soc.id, flat_number="A-102", name="Backup Person")
-        db.add(backup)
-        db.flush()
         db.add(m.Resident(society_id=soc.id, flat_number="A-101", name="Priya Sharma",
-                          backup_contact_id=backup.id))
-        db.add(m.Resident(society_id=soc.id, flat_number="A-103", name="Lonely Resident"))
+                          is_primary=True))
+        db.add(m.Resident(society_id=soc.id, flat_number="A-101", name="Rohit Sharma"))
+        db.add(m.Resident(society_id=soc.id, flat_number="A-103", name="Lonely Resident",
+                          is_primary=True))
         db.flush()
         sid = soc.id
     yield sid
@@ -65,7 +68,7 @@ def test_silent_resident_escalates_to_backup_contact(society):
     with scoped_session(society) as db:
         row = db.get(m.VisitorSession, sid)
         assert row.status == "escalated"          # no longer waiting forever
-        assert row.resolved_by == "backup_contact"  # A-101 has a backup
+        assert row.resolved_by == "backup_contact"  # A-101's other resident
         assert row.resolved_at is not None
         assert any("timeout" in e["action"] for e in row.decision_trace)
 
@@ -77,7 +80,28 @@ def test_silent_resident_escalates_to_backup_contact(society):
         assert "did not reply" in esc.reason
 
 
-def test_flat_without_backup_falls_back_to_the_guard(society):
+def test_escalation_reaches_the_housemate_not_the_primary(society):
+    """
+    E6-S3: escalating past a silent Priya must reach Rohit — the other person
+    behind the same door — and not notify Priya a second time.
+    """
+    sid = _make_session(society, "A-101", age_minutes=30)
+    sweep_once(timeout_minutes=10)
+
+    with scoped_session(society) as db:
+        rohit = db.execute(
+            select(m.Resident).where(m.Resident.flat_number == "A-101",
+                                     m.Resident.name == "Rohit Sharma")
+        ).scalars().one()
+        notified = db.execute(
+            select(m.NotificationDeliveryLog.resident_id)
+            .where(m.NotificationDeliveryLog.session_id == sid)
+        ).scalars().all()
+        assert rohit.id in notified, "the household's other resident is the backup"
+
+
+def test_flat_without_another_resident_falls_back_to_the_guard(society):
+    """A-103 is a one-person flat: there is no housemate to escalate to."""
     sid = _make_session(society, "A-103", age_minutes=30)
 
     sweep_once(timeout_minutes=10)
@@ -85,7 +109,7 @@ def test_flat_without_backup_falls_back_to_the_guard(society):
     with scoped_session(society) as db:
         row = db.get(m.VisitorSession, sid)
         assert row.status == "escalated"
-        # No backup configured -> the guard's default policy, reported honestly.
+        # Nobody else behind the door -> the guard's default policy, reported honestly.
         assert row.resolved_by == "guard_default"
         esc = db.execute(
             select(m.Escalation).where(m.Escalation.session_id == sid)

@@ -22,8 +22,9 @@ from backend.tools.intercom_tools import (
 @pytest.fixture
 def society_with_session():
     """
-    Society A: a resident (A-101) with a backup contact (A-102), plus a pending
-    session awaiting the resident. Society B is separate for scoping checks.
+    Society A: a shared flat A-101 whose primary contact is Priya and whose
+    backup is her housemate Rohit (E6-S3), plus a pending session awaiting the
+    resident. Society B is separate for scoping checks.
     """
     ids = {}
     with system_session() as db:
@@ -32,14 +33,11 @@ def society_with_session():
         db.add_all([a, b])
         db.flush()
 
-        backup = m.Resident(society_id=a.id, flat_number="A-102", name="Backup Person")
-        db.add(backup)
-        db.flush()
-        db.add(m.Resident(
-            society_id=a.id, flat_number="A-101", name="Priya Sharma",
-            backup_contact_id=backup.id,
-        ))
-        db.add(m.Resident(society_id=b.id, flat_number="B-101", name="Arun Mehta"))
+        db.add(m.Resident(society_id=a.id, flat_number="A-101", name="Priya Sharma",
+                          is_primary=True))
+        db.add(m.Resident(society_id=a.id, flat_number="A-101", name="Rohit Sharma"))
+        db.add(m.Resident(society_id=b.id, flat_number="B-101", name="Arun Mehta",
+                          is_primary=True))
 
         session = m.VisitorSession(
             society_id=a.id, visitor_name="Vikram Nair", flat_number="A-101",
@@ -104,7 +102,7 @@ def test_escalate_records_escalation_and_notifies_backup(society_with_session):
         ctx = IntercomContext(db, society_with_session["a"], society_with_session["session"])
         res = escalate_to_backup_contact(ctx, "Resident timed out")
         assert res["escalated"] is True
-        assert res["backup_notified"] is True  # A-101 has a backup contact (A-102)
+        assert res["backup_notified"] is True  # A-101's other resident, Rohit
 
     with scoped_session(society_with_session["a"]) as db:
         esc = db.execute(
