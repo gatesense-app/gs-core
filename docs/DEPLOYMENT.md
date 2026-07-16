@@ -131,8 +131,27 @@ guards and resident logins.
 | `deploy.yml` | push to `main` | migrations, then Railway + Vercel production deploy |
 | `dev-deploy.yml` | manual | deploy `dev` to a staging service |
 
-Repo secrets required by the deploy workflows: `RAILWAY_TOKEN`,
-`PROD_DATABASE_URL`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+Repo secrets required by the deploy workflows, and where they stood when this was
+written (salvaged from an older setup handoff — re-check in Settings → Secrets
+before relying on it):
+
+| Secret | Status |
+|---|---|
+| `VERCEL_TOKEN` | ✅ set |
+| `VERCEL_ORG_ID` | ✅ set |
+| `VERCEL_PROJECT_ID` | ✅ set |
+| `ANTHROPIC_API_KEY` | ✅ set |
+| `RAILWAY_TOKEN` | ❌ **not set** |
+| `PROD_DATABASE_URL` | ❌ **not set** |
+
+**So merging to `main` today runs `deploy.yml` and the Railway half fails** on the
+missing token/DB URL. That's noisy rather than dangerous — nothing is deployed to
+break — but do the steps above first if you want it to go green.
+
+The Vercel project is **`gatesense`** under the **`playoffe`** scope (the
+IDs live in the repo secrets above, not here). Its GitHub integration also
+auto-deploys and is **currently failing** — it predates this work and is the
+unconfigured **Root Directory**, which must be `frontend` (step 3).
 
 The agent eval is **not** in CI (real Claude calls, non-deterministic). Run it
 when prompts or agent behaviour change and commit the report:
