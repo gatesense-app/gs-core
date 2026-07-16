@@ -121,6 +121,41 @@ class FlatResponse(BaseModel):
     code: str
     # Q2: the declared shape is a hint. Exceeding it warns and saves.
     warnings: list[str] = Field(default_factory=list)
+    # E4-S4: free-text residents this flat adopted on creation.
+    linked_residents: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Reconcile free-text residents onto flats (E4-S4 / D4)
+# ---------------------------------------------------------------------------
+class UnmatchedResident(BaseModel):
+    """
+    A resident whose free-text flat_number matches no flat code.
+
+    Listed for a human to resolve — never dropped, and never auto-linked on a
+    guess. `suggested_*` is a hint for the UI (D2: the system doesn't invent).
+    """
+
+    resident_id: str
+    name: str
+    flat_number: str
+    suggested_flat_id: Optional[str] = None
+    suggested_code: Optional[str] = None
+
+
+class ReconcileReport(BaseModel):
+    society_id: str
+    flat_count: int
+    linked: int
+    unmatched_count: int
+    unmatched: list[UnmatchedResident] = Field(default_factory=list)
+
+
+class ReconcileLink(BaseModel):
+    """Manual resolution of one resident the exact-match pass couldn't place."""
+
+    resident_id: str
+    flat_id: str
 
 
 # ---------------------------------------------------------------------------

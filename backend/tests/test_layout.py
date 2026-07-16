@@ -330,9 +330,9 @@ def test_an_empty_wing_can_be_deleted(society):
 
 def test_adding_a_layout_does_not_disturb_existing_residents(society):
     """
-    E4-S1/S2 are purely additive: the guard still types `A-101` and the agents
-    still resolve it via residents.flat_number. flat_id stays NULL until the
-    reconcile story (E4-S4) links it.
+    The layout is additive to the gate: the guard still types `A-101` and the
+    agents still resolve it via residents.flat_number. E4-S4 adds the flat_id
+    link alongside that string — it does not replace it (that's E6-S3).
     """
     with system_session() as db:
         db.add(m.Resident(society_id=society, flat_number="A-101", name="Priya Sharma"))
@@ -345,4 +345,4 @@ def test_adding_a_layout_does_not_disturb_existing_residents(society):
     with system_session() as db:
         r = db.execute(select(m.Resident).where(m.Resident.society_id == society)).scalars().one()
         assert r.flat_number == "A-101", "the string the agents resolve on is untouched"
-        assert r.flat_id is None, "linking is E4-S4's job, not this story's"
+        assert r.flat_id is not None, "E4-S4: the flat adopts the resident already on its code"

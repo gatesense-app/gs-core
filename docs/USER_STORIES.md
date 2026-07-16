@@ -273,7 +273,7 @@ Per **D2** this **declares the grid** — it does **not** create flats.
   refused (or needs explicit confirmation) when it has residents or visitor
   history — silently removing an occupied flat is unacceptable.
 
-### E4-S3 — Reconcile existing free-text flats *(see D4)*
+### E4-S4 — Reconcile existing free-text flats *(see D4)*
 > **As a** platform admin, **I want** existing residents matched to generated
 > flats, **so that** introducing a layout doesn't orphan anyone.
 
