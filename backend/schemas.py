@@ -174,6 +174,35 @@ class ReconcileLink(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# CSV import (E3)
+# ---------------------------------------------------------------------------
+class ImportRowError(BaseModel):
+    """One rejected row, pinned to its file line and offending column."""
+
+    row: int
+    column: Optional[str] = None
+    message: str
+
+
+class ImportReport(BaseModel):
+    """
+    What an import did, or (dry run) would do.
+
+    `committed` is the honest bit: true only when rows were actually written.
+    A preview, or a commit that hit any row error, leaves it false.
+    """
+
+    dry_run: bool
+    committed: bool
+    total_rows: int
+    residents_to_create: int
+    residents_to_update: int
+    flats_to_create: int
+    rejected_rows: int
+    errors: list[ImportRowError] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Residents
 # ---------------------------------------------------------------------------
 class ResidentCreate(BaseModel):

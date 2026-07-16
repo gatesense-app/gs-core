@@ -183,9 +183,11 @@ screen already offers `society_admin` in its role dropdown.
 - Import is **all-or-nothing per upload** (one transaction) — a bad row 250
   never leaves 249 half-imported residents.
 - Errors report the **row number and the offending column**, not "invalid input".
-- A resident who exists already (same flat + name, or a chosen key) is updated,
-  not duplicated — **Open:** what is the natural key? Flat alone is not unique
-  once D3 says a flat can hold several people.
+- A resident who exists already is updated, not duplicated. **Settled:** the
+  natural key is **(society_id, code, name)**, case-insensitive on name. Flat
+  alone can't be the key once D3 lets a flat hold several people; the name is
+  what tells them apart. Re-importing the same person updates their phone /
+  primary flag rather than creating a second row.
 - Only `society_admin`/`platform_admin` may import; a guard or resident gets `403`.
 - Nothing in the file can override tenancy: a `society_id` column is ignored.
 
@@ -210,8 +212,10 @@ wing, flat_number, floor, resident_name, phone, is_primary_contact (opt)
   (`"a"` vs `"A"`) silently spawns a phantom wing.
 - Flats that don't exist yet **are** created by the import (this is the bulk
   path — see D2 note 3).
-- **Open:** are `standing_rules` / `delivery_preferences` importable? They're
-  JSON and awkward in CSV; recommend leaving them to the UI/portal for now.
+- **Settled:** `standing_rules` / `delivery_preferences` are **not** importable.
+  They're JSON, awkward in a CSV cell, and now live on the flat (E6-S3) — the UI
+  and portal set them. The import establishes occupancy; rules are a separate,
+  deliberate edit.
 
 ### E3-S2 — CSV rejects unsafe/malformed input
 > **As a** society admin, **I want** a bad file to fail loudly, **so that** I
