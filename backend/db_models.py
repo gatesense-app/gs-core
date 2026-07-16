@@ -18,6 +18,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -96,11 +97,38 @@ class Flat(Base):
     flat_number = Column(String(32), nullable=False)
     floor = Column(Integer, nullable=False)
     code = Column(String(64), nullable=False)
+    # E6-S3: rules belong to the door, not to whoever happens to live behind it —
+    # two residents must not hold contradictory rules for one flat.
+    #
+    # Deliberately NULLABLE, unlike the residents columns: NULL means "not set,
+    # fall back to the primary resident", which is different from [] meaning
+    # "explicitly no rules". A [] default would make a society's first reconcile
+    # silently overrule every resident's real rules — a gate behaviour change
+    # delivered by a migration.
+    standing_rules = Column(JSONB)
+    delivery_preferences = Column(JSONB)
     created_at = _created_at()
 
 
 class Resident(Base):
+    """
+    A person behind a flat. Several per flat is normal (D3), so exactly one of
+    them is the flat's primary contact — the person the agents actually reach.
+    """
+
     __tablename__ = "residents"
+    __table_args__ = (
+        # At most one primary per flat, enforced by Postgres rather than by
+        # hope. Keyed on flat_number (not flat_id) because it must hold in both
+        # worlds: today nearly every resident has flat_id NULL, and the agents
+        # resolve on this string until the layout is reconciled.
+        Index(
+            "uq_residents_primary_per_flat",
+            "society_id", "flat_number",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
+    )
 
     id = _pk()
     society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
@@ -110,8 +138,11 @@ class Resident(Base):
     flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="SET NULL"))
     name = Column(String(200), nullable=False)
     phone = Column(String(32))
-    backup_contact_id = Column(_UUID, ForeignKey("residents.id", ondelete="SET NULL"))
+    # E6-S3 / Q3: the flat's contact, defaulting to the first resident added.
+    # Never rely on "whichever row the database returned first".
+    is_primary = Column(Boolean, nullable=False, server_default=text("false"))
     # e.g. [{"type": "always_allow", "match": "Swiggy"}, {"type": "never_allow", "after": "21:00"}]
+    # A flat's own rules win over these when set (see tools/resolve.py).
     standing_rules = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     # e.g. {"auto_log_daytime": true, "notify_after_hours": true}
     delivery_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))

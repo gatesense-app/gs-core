@@ -353,11 +353,19 @@ invisible; with a family it means **notifying an arbitrary person**.
   a flat with residents is never left uncontactable.
 - Standing rules and delivery preferences are resolved **per flat**, not per
   resident — otherwise two residents could hold contradictory rules for the same
-  door. **Open:** this likely means moving `standing_rules` /
-  `delivery_preferences` off `residents` onto `flats`, which is a migration and a
-  change to every agent tool that reads them.
-- The escalation chain still works. **Open:** is the backup contact now "another
-  resident of this flat" rather than a linked `backup_contact_id`?
+  door. **Settled:** `flats.standing_rules` / `flats.delivery_preferences` were
+  added and win when set, falling back to the primary contact's own when not.
+  They are **nullable on purpose**: `NULL` means "not set → fall back", which is
+  a different statement from `[]` meaning "explicitly no rules". A `[]` default
+  would have made a society's first reconcile silently overrule every resident's
+  real rules — a gate behaviour change delivered by a migration. The fallback is
+  also what keeps unreconciled residents (`flat_id IS NULL`) working.
+- The escalation chain still works. **Settled:** the backup contact is now
+  another resident of the same flat — the household, in the flat's deterministic
+  order — and `residents.backup_contact_id` is dropped. A flat with nobody else
+  behind the door still falls through to the guard's default policy. The
+  `escalate_to_backup_contact` tool keeps its name: the agents' tool names are
+  part of their prompt contract, and only the lookup changed.
 - **The eval gains a shared-flat scenario** asserting the primary contact is the
   one notified. Today's 21 scenarios all use single-resident flats, so a
   regression to `.first()` would pass them silently — the eval is the only thing

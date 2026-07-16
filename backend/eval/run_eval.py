@@ -39,6 +39,22 @@ _FLATS = [
      {"auto_log_daytime": False, "notify_after_hours": True}),
 ]
 
+# A-105 is a family flat (D3), and the reason E6-S3 exists: the agents must
+# contact its *primary* resident, not whoever the database hands back.
+#
+# The insert order below is load-bearing. Karan is written FIRST and Meera is
+# the primary — so an unordered `.first()`, which is what every tool did before
+# E6-S3, returns Karan and fails the scenario. Seed them the other way round and
+# the bug would pass this eval silently, which is exactly the trap this scenario
+# is here to close.
+_SHARED_FLAT = "A-105"
+_SHARED_RESIDENTS = [
+    # name,          is_primary
+    ("Karan Iyer", False),
+    ("Meera Iyer", True),
+]
+_SHARED_PRIMARY = "Meera Iyer"
+
 _VISITORS = [
     # name, type, is_known_service, typical_hours, visit_count
     ("Swiggy", "delivery", True, {"start": "11:00", "end": "23:00"}, 45),
@@ -59,7 +75,17 @@ def setup() -> str:
         db.flush()
         for flat, name, rules, prefs in _FLATS:
             db.add(m.Resident(society_id=soc.id, flat_number=flat, name=name,
-                              standing_rules=rules, delivery_preferences=prefs))
+                              is_primary=True, standing_rules=rules,
+                              delivery_preferences=prefs))
+        # Written one at a time so the physical row order is Karan-then-Meera
+        # (see _SHARED_RESIDENTS): the scenario has to be able to fail.
+        for name, is_primary in _SHARED_RESIDENTS:
+            db.add(m.Resident(
+                society_id=soc.id, flat_number=_SHARED_FLAT, name=name,
+                is_primary=is_primary, standing_rules=[],
+                delivery_preferences={"auto_log_daytime": False, "notify_after_hours": True},
+            ))
+            db.flush()
         for vn, vt, known, hours, count in _VISITORS:
             db.add(m.Visitor(society_id=soc.id, name=vn, visitor_type=vt,
                              is_known_service=known, typical_hours=hours,
@@ -99,8 +125,23 @@ def _run_one(society_id: str, sc: dict) -> dict:
                 select(m.Escalation).where(m.Escalation.session_id == session_id)
             ).scalars().first() is not None
 
+    # Who did we actually wake up? The status label can be right while the wrong
+    # person is holding the phone, so a shared flat has to assert the name too
+    # (E6-S3).
+    notified = None
+    if sc.get("expect_notified"):
+        with scoped_session(society_id) as db:
+            notified = db.execute(
+                select(m.Resident.name)
+                .join(m.NotificationDeliveryLog,
+                      m.NotificationDeliveryLog.resident_id == m.Resident.id)
+                .where(m.NotificationDeliveryLog.session_id == session_id)
+            ).scalars().first()
+
     passed = status == sc["expected"]
     if sc.get("expect_escalation") and not escalated:
+        passed = False
+    if sc.get("expect_notified") and notified != sc["expect_notified"]:
         passed = False
 
     return {
@@ -111,6 +152,8 @@ def _run_one(society_id: str, sc: dict) -> dict:
         "agents": agents,
         "escalation_expected": bool(sc.get("expect_escalation")),
         "escalation_found": escalated,
+        "notified_expected": sc.get("expect_notified"),
+        "notified_actual": notified,
         "passed": passed,
     }
 
@@ -191,6 +234,11 @@ def _write_report(results, skipped, started, passed, total, accuracy) -> None:
             lines.append(f"  - expected `{r['expected']}`, got `{r['actual']}`")
             if r["escalation_expected"] and not r["escalation_found"]:
                 lines.append("  - expected an escalation row, none was recorded")
+            if r["notified_expected"] and r["notified_actual"] != r["notified_expected"]:
+                lines.append(
+                    f"  - expected `{r['notified_expected']}` to be notified, "
+                    f"got `{r['notified_actual']}`"
+                )
 
     lines += [
         "",

@@ -19,12 +19,14 @@ from backend.routers.common import parse_uuid, resolve_society_id
 from backend.schemas import (
     FlatCreate,
     FlatResponse,
+    FlatRulesUpdate,
     ReconcileLink,
     ReconcileReport,
     UnmatchedResident,
     WingCreate,
     WingResponse,
 )
+from backend.tools import resolve
 
 router = APIRouter(tags=["layout"])
 
@@ -70,6 +72,8 @@ def _flat_resp(
         code=f.code,
         warnings=warnings or [],
         linked_residents=linked_residents,
+        standing_rules=f.standing_rules,
+        delivery_preferences=f.delivery_preferences,
     )
 
 
@@ -285,9 +289,18 @@ def reconcile_link(
         # Unreachable via RLS for a scoped role; a platform_admin bypasses it.
         raise HTTPException(400, "Resident and flat belong to different societies")
 
+    # The primary slot is keyed on flat_number, so a resident who was primary of
+    # "A101" cannot carry the flag onto "A-101" if someone already holds it
+    # there — that trips the unique index. Release first, re-settle both doors
+    # after: the one being left must not lose its contact either.
+    old_flat_number = resident.flat_number
+    resolve.release_primary(db, resident)
     resident.flat_id = flat.id
     resident.flat_number = flat.code
     db.flush()
+    resolve.ensure_primary(db, resident.society_id, old_flat_number)
+    resolve.ensure_primary(db, resident.society_id, flat.code)
+
     return _build_report(db, resident.society_id)
 
 
@@ -381,6 +394,34 @@ def get_flat(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)
     flat = db.get(m.Flat, parse_uuid(flat_id))
     if flat is None:
         raise HTTPException(404, "Flat not found")
+    return _flat_resp(flat, db.get(m.Wing, flat.wing_id).name)
+
+
+@router.patch("/flats/{flat_id}", response_model=FlatResponse)
+def update_flat_rules(
+    flat_id: str,
+    body: FlatRulesUpdate,
+    _: CurrentUser = Depends(_admins),
+    db=Depends(get_db),
+):
+    """
+    Set the standing rules / delivery preferences for a door (E6-S3).
+
+    These override whatever its residents hold individually, which is the point:
+    two people behind one door can't be allowed to contradict each other about
+    who gets in. Sending null clears the override and hands the door back to its
+    primary contact's own rules.
+    """
+    flat = db.get(m.Flat, parse_uuid(flat_id))
+    if flat is None:
+        raise HTTPException(404, "Flat not found")
+
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(422, "Nothing to update")
+    for key, value in fields.items():
+        setattr(flat, key, value)
+    db.flush()
     return _flat_resp(flat, db.get(m.Wing, flat.wing_id).name)
 
 

@@ -11,6 +11,12 @@ Fixture flats (created by run_eval.setup):
   A-102  never_allow after 21:00    | auto_log_daytime=True,  notify_after_hours=True
   A-103  (no rules)                 | auto_log_daytime=False, notify_after_hours=True
   A-104  always_allow Amazon        | auto_log_daytime=False, notify_after_hours=True
+  A-105  (no rules)  — a SHARED flat: Karan Iyer is stored first, Meera Iyer is
+         the primary contact. `expect_notified` asserts the agent reached Meera.
+
+`expect_notified` names the resident who must receive the notification. Only the
+shared flat needs it: a status label can be correct while the wrong member of
+the household is the one holding the phone (E6-S3).
 
 Known visitors: Swiggy / Amazon / Blinkit (known delivery services),
 Raju Plumber and Lakshmi (Maid) (known people, not services).
@@ -202,5 +208,27 @@ SCENARIOS = [
             "then don't let him in",
         ],
         "expected": "denied",
+    },
+
+    # --- Shared flats (D3 / E6-S3) --------------------------------------------
+    {
+        "id": "share-01",
+        "why": ("A flat with a family must notify its primary contact (Meera), not "
+                "whichever resident the database returned first (Karan). This is the "
+                "only scenario that fails on a regression to an unordered .first()."),
+        "flat": "A-105", "visitor": "Vikram Nair", "purpose": "guest",
+        "detail": "Friend visiting for dinner",
+        "expected": "awaiting_resident",
+        "expect_notified": "Meera Iyer",
+    },
+    {
+        "id": "share-02",
+        "why": ("The primary contact answers for the whole flat: her reply resolves "
+                "the visit without asking anyone else in the household."),
+        "flat": "A-105", "visitor": "Raju Plumber", "purpose": "service",
+        "detail": "Plumbing repair",
+        "replies": ["yes, I called him, let him in"],
+        "expected": "approved",
+        "expect_notified": "Meera Iyer",
     },
 ]

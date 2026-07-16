@@ -8,8 +8,8 @@ Regenerate with:
 python -m backend.eval.run_eval
 ```
 
-- **Run:** 2026-07-15T06:42:13+00:00
-- **Result:** 21/21 passed (100%)
+- **Run:** 2026-07-16T06:50:33+00:00
+- **Result:** 23/23 passed (100%)
 
 | Scenario | Expected | Actual | Agents | Result |
 |---|---|---|---|---|
@@ -34,6 +34,8 @@ python -m backend.eval.run_eval
 | `icom-06` | approved | approved | gate → intercom | ✅ |
 | `icom-07` | escalated | escalated | gate → delivery → intercom | ✅ |
 | `icom-08` | denied | denied | gate → intercom | ✅ |
+| `share-01` | awaiting_resident | awaiting_resident | gate → intercom | ✅ |
+| `share-02` | approved | approved | gate → intercom | ✅ |
 
 ### What each scenario checks
 
@@ -58,6 +60,8 @@ python -m backend.eval.run_eval
 - **`icom-06`** — Full clarification loop: question -> guard answers -> resident approves.
 - **`icom-07`** — Deferring to the guard escalates rather than approving.
 - **`icom-08`** — Clarification then refusal must end denied, not approved.
+- **`share-01`** — A flat with a family must notify its primary contact (Meera), not whichever resident the database returned first (Karan). This is the only scenario that fails on a regression to an unordered .first().
+- **`share-02`** — The primary contact answers for the whole flat: her reply resolves the visit without asking anyone else in the household.
 
 ### Notes
 

@@ -123,6 +123,21 @@ class FlatResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # E4-S4: free-text residents this flat adopted on creation.
     linked_residents: int = 0
+    # E6-S3: rules for the door. null means "not set" — the primary contact's
+    # own rules apply — which is different from [] meaning "no rules".
+    standing_rules: Optional[list[dict[str, Any]]] = None
+    delivery_preferences: Optional[dict[str, Any]] = None
+
+
+class FlatRulesUpdate(BaseModel):
+    """
+    Set the rules that apply at a door, overriding its residents' own (E6-S3).
+
+    Send null to clear an override and fall back to the primary contact again.
+    """
+
+    standing_rules: Optional[list[dict[str, Any]]] = None
+    delivery_preferences: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +190,9 @@ class ResidentUpdate(BaseModel):
     flat_number: Optional[str] = None
     name: Optional[str] = None
     phone: Optional[str] = None
+    # E6-S3: set true to make this resident the flat's contact. There is no
+    # "demote" — a flat always needs someone, so promote another instead.
+    is_primary: Optional[bool] = None
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
 
@@ -185,6 +203,8 @@ class ResidentResponse(BaseModel):
     flat_number: str
     name: str
     phone: Optional[str] = None
+    # The one the agents contact for this flat (Q3).
+    is_primary: bool = False
     standing_rules: list[dict[str, Any]] = Field(default_factory=list)
     delivery_preferences: dict[str, Any] = Field(default_factory=dict)
 

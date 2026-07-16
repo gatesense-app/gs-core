@@ -5,6 +5,7 @@ from backend import db_models as m
 from backend.deps import CurrentUser, get_db, require_role
 from backend.routers.common import parse_uuid, resolve_society_id
 from backend.schemas import ResidentCreate, ResidentResponse, ResidentUpdate
+from backend.tools import resolve
 
 router = APIRouter(prefix="/residents", tags=["residents"])
 
@@ -18,6 +19,7 @@ def _to_resp(r: m.Resident) -> ResidentResponse:
         flat_number=r.flat_number,
         name=r.name,
         phone=r.phone,
+        is_primary=r.is_primary,
         standing_rules=r.standing_rules or [],
         delivery_preferences=r.delivery_preferences or {},
     )
@@ -42,6 +44,9 @@ def create_resident(body: ResidentCreate, user: CurrentUser = Depends(_admins), 
     )
     db.add(resident)
     db.flush()
+    # Q3: the first resident added for a flat is its contact. A later one joins
+    # the household without stealing the slot.
+    resolve.ensure_primary(db, society_id, resident.flat_number)
     return _to_resp(resident)
 
 
@@ -63,7 +68,32 @@ def update_resident(
     resident = db.get(m.Resident, parse_uuid(resident_id))
     if resident is None:
         raise HTTPException(404, "Resident not found")
-    for key, value in body.model_dump(exclude_unset=True).items():
+
+    fields = body.model_dump(exclude_unset=True)
+    want_primary = fields.pop("is_primary", None)
+    if want_primary is False:
+        # A flat always needs a contact, so "stop being primary" is not an
+        # instruction we can honour on its own — promote someone else instead.
+        raise HTTPException(
+            422,
+            "Promote another resident of this flat instead of demoting this one",
+        )
+
+    old_flat_number = resident.flat_number
+    moving = "flat_number" in fields and fields["flat_number"] != old_flat_number
+    if moving:
+        # The primary slot is per flat: carrying the flag onto the new door
+        # would collide with whoever holds it there.
+        resolve.release_primary(db, resident)
+
+    for key, value in fields.items():
         setattr(resident, key, value)
     db.flush()
+
+    if moving:
+        # Neither door is left uncontactable.
+        resolve.ensure_primary(db, resident.society_id, old_flat_number)
+        resolve.ensure_primary(db, resident.society_id, resident.flat_number)
+    if want_primary:
+        resolve.claim_primary(db, resident)
     return _to_resp(resident)

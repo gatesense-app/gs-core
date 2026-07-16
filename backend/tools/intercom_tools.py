@@ -18,9 +18,8 @@ real. Swap send_notification's body for Twilio / FCM in production.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
 from backend import db_models as m
+from backend.tools import resolve
 
 
 class IntercomContext:
@@ -37,15 +36,12 @@ def send_notification(ctx: IntercomContext, flat_number: str, resident_name: str
     Deliver a message to the resident and record it. No real SMS is sent yet;
     we log an in-app notification so the delivery is auditable (RLS-scoped).
     """
-    # Filter on society_id explicitly rather than leaning on RLS: the timeout
-    # sweeper calls these tools with a system (RLS-bypassed) session, where a
-    # flat_number alone matches that flat in *every* society.
-    resident = ctx.db.execute(
-        select(m.Resident).where(
-            m.Resident.society_id == ctx.society_id,
-            m.Resident.flat_number == flat_number,
-        )
-    ).scalars().first()
+    # The flat's primary contact (E6-S3) — with several residents behind one
+    # door this used to be whoever the database returned first, i.e. a coin
+    # flip between family members. resolve also filters on society_id, which
+    # matters because the timeout sweeper calls this with a system
+    # (RLS-bypassed) session where flat_number matches in *every* society.
+    resident = resolve.primary_resident(ctx.db, ctx.society_id, flat_number)
 
     log = m.NotificationDeliveryLog(
         society_id=ctx.society_id,
@@ -89,23 +85,25 @@ def update_visitor_session(ctx: IntercomContext, status: str, resolved_by: str) 
 
 def escalate_to_backup_contact(ctx: IntercomContext, reason: str) -> dict:
     """
-    Escalate to the flat's backup contact: record an escalations row and a
-    notification to the backup resident (if one is configured). RLS-scoped.
+    Escalate past a silent primary contact to the rest of the household.
+
+    E6-S3 changed *who* the backup is, not what this tool means to the agent
+    (the name is part of the prompt contract, so it stays). A flat's backup is
+    now the next resident behind the same door — the spouse standing right
+    there — rather than a separately linked `backup_contact_id`. A flat with
+    nobody else still falls through to the guard's default policy.
     """
     row = ctx.db.get(m.VisitorSession, ctx.session_uuid)
     backup = None
     if row is not None:
-        # society_id is explicit here for the same reason as send_notification:
-        # the sweeper runs without RLS, so flat_number alone is ambiguous across
-        # societies and could resolve a neighbouring tenant's resident.
-        resident = ctx.db.execute(
-            select(m.Resident).where(
-                m.Resident.society_id == ctx.society_id,
-                m.Resident.flat_number == row.flat_number,
-            )
-        ).scalars().first()
-        if resident is not None and resident.backup_contact_id is not None:
-            backup = ctx.db.get(m.Resident, resident.backup_contact_id)
+        primary = resolve.primary_resident(ctx.db, ctx.society_id, row.flat_number)
+        others = resolve.other_flat_residents(
+            ctx.db, ctx.society_id, row.flat_number,
+            exclude_id=primary.id if primary else None,
+        )
+        # Deterministic: the next resident in the flat's stable order, never
+        # "whoever the database returned".
+        backup = others[0] if others else None
 
     # Record where it actually went: with no backup contact configured, the
     # fallback is the guard's default policy, and saying "backup_contact"
