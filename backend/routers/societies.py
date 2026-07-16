@@ -22,6 +22,23 @@ def _admin_counts(db, society_ids: list) -> dict:
     return {sid: count for sid, count in rows}
 
 
+def _flat_counts(db, society_ids: list) -> dict:
+    """
+    society_id -> number of actual flats (E4-S1).
+
+    Counted from the flats that exist, never floors * flats_per_floor: the
+    declared shape is a hint (Q2), so deriving the total would let it lie.
+    """
+    if not society_ids:
+        return {}
+    rows = db.execute(
+        select(m.Flat.society_id, func.count(m.Flat.id))
+        .where(m.Flat.society_id.in_(society_ids))
+        .group_by(m.Flat.society_id)
+    ).all()
+    return {sid: count for sid, count in rows}
+
+
 @router.post("", status_code=201, response_model=SocietyResponse)
 def create_society(
     body: SocietyCreate,
@@ -63,6 +80,7 @@ def create_society(
         address=society.address,
         created_at=society.created_at,
         admin_count=admin_count,
+        flat_count=0,  # a new society has no layout yet
     )
 
 
@@ -72,7 +90,9 @@ def list_societies(
     db=Depends(get_db),
 ):
     rows = db.execute(select(m.Society).order_by(m.Society.created_at)).scalars().all()
-    counts = _admin_counts(db, [s.id for s in rows])
+    ids = [s.id for s in rows]
+    counts = _admin_counts(db, ids)
+    flats = _flat_counts(db, ids)
     return [
         SocietyResponse(
             id=str(s.id),
@@ -80,6 +100,7 @@ def list_societies(
             address=s.address,
             created_at=s.created_at,
             admin_count=counts.get(s.id, 0),
+            flat_count=flats.get(s.id, 0),
         )
         for s in rows
     ]
@@ -111,10 +132,12 @@ def update_society(
     db.flush()
 
     counts = _admin_counts(db, [society.id])
+    flats = _flat_counts(db, [society.id])
     return SocietyResponse(
         id=str(society.id),
         name=society.name,
         address=society.address,
         created_at=society.created_at,
         admin_count=counts.get(society.id, 0),
+        flat_count=flats.get(society.id, 0),
     )

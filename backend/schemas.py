@@ -72,6 +72,55 @@ class SocietyResponse(BaseModel):
     created_at: Optional[datetime] = None
     # Lets the UI flag a society that nobody can administer yet.
     admin_count: int = 0
+    # Counted from actual flats, never floors * flats_per_floor (E4-S1 / Q2), so
+    # the number can't lie when reality disagrees with the declared shape.
+    flat_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Layout: wings + flats (E4-S1 / E4-S2)
+# ---------------------------------------------------------------------------
+class WingCreate(BaseModel):
+    """Declares the shape of a grid. Creates no flats (D2)."""
+
+    name: str = Field(min_length=1, max_length=64)
+    floors: int = Field(ge=1)
+    flats_per_floor: int = Field(ge=1)
+    society_id: Optional[str] = None  # platform_admin only
+
+
+class WingResponse(BaseModel):
+    id: str
+    society_id: str
+    name: str
+    floors: int
+    flats_per_floor: int
+    # Actual flats entered so far — the grid renders empty until they are.
+    flat_count: int = 0
+
+
+class FlatCreate(BaseModel):
+    """
+    The admin types the number; the system never invents it (D2).
+
+    `floor` is given, not parsed from the number (Q1).
+    """
+
+    wing_id: str
+    flat_number: str = Field(min_length=1, max_length=32)
+    floor: int
+
+
+class FlatResponse(BaseModel):
+    id: str
+    society_id: str
+    wing_id: str
+    wing_name: str
+    flat_number: str
+    floor: int
+    code: str
+    # Q2: the declared shape is a hint. Exceeding it warns and saves.
+    warnings: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
