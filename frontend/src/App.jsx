@@ -13,6 +13,8 @@ import GuardKiosk from './pages/GuardKiosk'
 import SessionDetail from './pages/SessionDetail'
 import Portal from './pages/Portal'
 import Notifications from './pages/Notifications'
+import Layout from './pages/Layout'
+import FlatDetail from './pages/FlatDetail'
 
 const logoLink = { display: 'flex', alignItems: 'center' }
 const logoImg = { height: 26, width: 'auto', display: 'block' }
@@ -20,8 +22,8 @@ const navLink = { fontSize: 14, color: colors.sub, textDecoration: 'none' }
 
 // Which nav links each role sees.
 const LINKS = {
-  platform_admin: [['/societies', 'Societies'], ['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications']],
-  society_admin: [['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications'], ['/kiosk', 'Kiosk']],
+  platform_admin: [['/societies', 'Societies'], ['/layout', 'Layout'], ['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications']],
+  society_admin: [['/layout', 'Layout'], ['/residents', 'Residents'], ['/users', 'Users'], ['/dashboard', 'Sessions'], ['/notifications', 'Notifications'], ['/kiosk', 'Kiosk']],
   guard: [['/kiosk', 'Guard Kiosk']],
   resident: [['/portal', 'Home']],
 }
@@ -78,6 +80,8 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/home" element={<RoleHome />} />
           <Route path="/societies" element={<Protected roles={['platform_admin']}><Societies /></Protected>} />
+          <Route path="/layout" element={<Protected roles={['platform_admin', 'society_admin']}><Layout /></Protected>} />
+          <Route path="/flat/:id" element={<Protected roles={['platform_admin', 'society_admin']}><FlatDetail /></Protected>} />
           <Route path="/residents" element={<Protected roles={['platform_admin', 'society_admin']}><Residents /></Protected>} />
           <Route path="/users" element={<Protected roles={['platform_admin', 'society_admin']}><Users /></Protected>} />
           <Route path="/dashboard" element={<Protected roles={['platform_admin', 'society_admin']}><AdminDashboard /></Protected>} />
