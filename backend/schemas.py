@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 Role = Literal["platform_admin", "society_admin", "guard", "resident"]
 
@@ -34,11 +34,35 @@ class MeResponse(BaseModel):
 # Societies
 # ---------------------------------------------------------------------------
 class SocietyCreate(BaseModel):
+    """
+    The admin is optional: a society can be onboarded before anyone knows who
+    will run it, and an admin allocated later (POST /users with
+    role=society_admin). Supplying admin details still creates both at once.
+    """
+
     name: str
     address: Optional[str] = None
-    admin_email: EmailStr
-    admin_password: str = Field(min_length=6)
+    admin_email: Optional[EmailStr] = None
+    admin_password: Optional[str] = Field(default=None, min_length=6)
     admin_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _admin_is_all_or_nothing(self):
+        # Half an admin is a silent failure: an email with no password would
+        # create a society whose "admin" can never sign in.
+        if bool(self.admin_email) != bool(self.admin_password):
+            raise ValueError(
+                "admin_email and admin_password must be provided together, "
+                "or both omitted to create a society without an admin"
+            )
+        return self
+
+
+class SocietyUpdate(BaseModel):
+    """Only the society's own details; never its residents, users or sessions."""
+
+    name: Optional[str] = None
+    address: Optional[str] = None
 
 
 class SocietyResponse(BaseModel):
@@ -46,6 +70,8 @@ class SocietyResponse(BaseModel):
     name: str
     address: Optional[str] = None
     created_at: Optional[datetime] = None
+    # Lets the UI flag a society that nobody can administer yet.
+    admin_count: int = 0
 
 
 # ---------------------------------------------------------------------------
