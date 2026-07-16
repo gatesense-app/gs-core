@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 
 from backend import db_models as m
@@ -97,3 +97,24 @@ def update_resident(
     if want_primary:
         resolve.claim_primary(db, resident)
     return _to_resp(resident)
+
+
+@router.delete("/{resident_id}", status_code=204)
+def delete_resident(resident_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)):
+    resident = db.get(m.Resident, parse_uuid(resident_id))
+    if resident is None:  # RLS hides other societies' rows -> looks like 404
+        raise HTTPException(404, "Resident not found")
+
+    # Capture before the delete: the ORM object is expired afterwards, and we
+    # need these to re-settle the door. Removing the last resident leaves the
+    # flat vacant — the flats row is untouched, only the resident is gone.
+    society_id = resident.society_id
+    flat_number = resident.flat_number
+
+    db.delete(resident)
+    db.flush()
+
+    # If the household still has members, one of them must be the contact —
+    # promote the deterministic successor if we just removed the primary.
+    resolve.ensure_primary(db, society_id, flat_number)
+    return Response(status_code=204)
