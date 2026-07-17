@@ -242,14 +242,27 @@ def validate(db, society_id, rows: list[dict]) -> dict:
     # Match rows to existing residents by the natural key (code, lower(name)).
     existing_residents = _resident_index(db, society_id)
     to_create = to_update = 0
+    file_keys = set()
     for vr in valid_rows:
         key = (vr["code"], vr["name"].lower())
+        file_keys.add(key)
         if key in existing_residents:
             to_update += 1
         else:
             to_create += 1
 
     flats_to_create = sorted(c for c in flat_floor if c not in existing_flats)
+
+    # Residents the new flats will adopt (D4): already on the code, not yet
+    # linked, and not named in the file — the ones in the file are counted above
+    # as created/updated. Predicted here so the preview can say it out loud;
+    # silently swallowing a household would be the same bug as a silent rename.
+    new_codes = set(flats_to_create)
+    to_link = sum(
+        1
+        for (code, name), r in existing_residents.items()
+        if code in new_codes and r.flat_id is None and (code, name) not in file_keys
+    )
 
     return {
         "errors": errors,
@@ -266,6 +279,7 @@ def validate(db, society_id, rows: list[dict]) -> dict:
             "total_rows": len(rows),
             "residents_to_create": to_create,
             "residents_to_update": to_update,
+            "residents_to_link": to_link,
             "flats_to_create": len(flats_to_create),
             "rejected_rows": len({e["row"] for e in errors}),
         },
@@ -284,6 +298,10 @@ def apply_plan(db, society_id, plan: dict) -> None:
     flats = dict(plan["existing_flats"])
 
     # 1. Flats the file introduces (D2 note 3: import is the bulk create path).
+    #    Each one adopts the free-text residents already sitting on its code,
+    #    exactly as typing the flat in by hand does (D4) — a flat coming into
+    #    existence must not orphan the people already behind that door, and which
+    #    path created it is not a distinction anyone should be able to feel.
     for code in plan["flats_to_create"]:
         wing = _wing_for(wings, code)
         flat = m.Flat(
@@ -294,6 +312,7 @@ def apply_plan(db, society_id, plan: dict) -> None:
         db.add(flat)
         db.flush()
         flats[code] = flat
+        resolve.link_exact_matches(db, society_id, flat)
 
     # 2. Residents: update the ones we already have, create the rest, and link
     #    each to its flat so the layout and the agents agree. Keep each row's
@@ -320,22 +339,24 @@ def apply_plan(db, society_id, plan: dict) -> None:
     # The first row for each flat, in file order — Q3's tiebreak when no row is
     # marked. It has to be explicit: rows imported in one transaction share a
     # created_at, and gen_random_uuid() isn't monotonic, so ensure_primary's
-    # (created_at, id) order would pick an arbitrary row for a brand-new flat.
+    # (created_at, id) order would pick an arbitrary row.
     first_line = {}
     for vr in plan["rows"]:
         first_line.setdefault(vr["code"], vr["line"])
-    new_flats = set(plan["flats_to_create"])
 
     # 3. One primary per touched flat, deterministically (E6-S3 / Q3).
     for code in plan["flat_floor"]:
         line = plan["flat_primary_line"].get(code)
-        if line is None and code in new_flats:
-            # Brand-new flat, nobody marked: the first row wins (Q3).
-            line = first_line[code]
+        if line is None and not resolve.has_primary(db, society_id, code):
+            # Nobody is the contact for this door yet, so the first row wins (Q3).
+            # Gated on has_primary rather than "is this flat new": a new flat can
+            # arrive with an adopted resident who already holds the flag, and a
+            # file that said nothing about primaries must not depose them. Saying
+            # so is what is_primary_contact is for.
+            line = first_line.get(code)
         if line is not None:
             resolve.claim_primary(db, resident_by_line[line])
         else:
-            # An existing flat with no marked row keeps the primary it had.
             resolve.ensure_primary(db, society_id, code)
 
 

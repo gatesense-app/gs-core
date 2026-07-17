@@ -161,6 +161,81 @@ def test_reimport_updates_rather_than_duplicates(society):
     assert res[0].phone == "+919899999999"
 
 
+# --- D4: a flat the import creates adopts who already lives there -----------
+
+def _free_text_resident(society_id, flat_number, name, primary=True):
+    """A resident from before there was a layout: real flat_number, no flat_id."""
+    with system_session() as db:
+        db.add(m.Resident(society_id=society_id, flat_number=flat_number,
+                          name=name, is_primary=primary))
+        db.flush()
+
+
+def test_a_flat_the_import_creates_adopts_residents_already_on_its_code(society):
+    """
+    Parity with typing the flat in by hand: whichever path brings a flat into
+    existence, it must not orphan the people already behind that door (D4).
+    """
+    _free_text_resident(society, "A-101", "Neha Sharma")
+    _post(society, HEADER + "A,101,1,Ravi Kumar,+919812345000,\n", dry_run=False)
+
+    with system_session() as db:
+        neha = db.execute(select(m.Resident).where(
+            m.Resident.society_id == society, m.Resident.name == "Neha Sharma")).scalars().one()
+        flat = db.execute(select(m.Flat).where(
+            m.Flat.society_id == society, m.Flat.code == "A-101")).scalars().one()
+        assert neha.flat_id == flat.id, "the new flat adopted the resident already on A-101"
+
+
+def test_the_preview_says_how_many_it_will_adopt(society):
+    _free_text_resident(society, "A-101", "Neha Sharma")
+    r = _post(society, HEADER + "A,101,1,Ravi Kumar,,\n", dry_run=True)
+    body = r.json()
+    assert body["residents_to_link"] == 1
+    assert body["residents_to_create"] == 1   # Ravi; Neha is adopted, not created
+    assert _residents(society)[0].flat_id is None, "a preview still writes nothing"
+
+
+def test_a_resident_named_in_the_file_is_an_update_not_an_adoption(society):
+    """Neha is in the file, so she's counted once — as an update, not adopted."""
+    _free_text_resident(society, "A-101", "Neha Sharma")
+    body = _post(society, HEADER + "A,101,1,Neha Sharma,,\n", dry_run=True).json()
+    assert (body["residents_to_update"], body["residents_to_link"]) == (1, 0)
+
+
+def test_importing_does_not_depose_an_adopted_residents_primary(society):
+    """
+    A file that says nothing about primaries must not quietly take the contact
+    away from the household that already had one — adopting someone is not a
+    reason to depose them.
+    """
+    _free_text_resident(society, "A-101", "Neha Sharma", primary=True)
+    _post(society, HEADER + "A,101,1,Ravi Kumar,,\n", dry_run=False)
+
+    with scoped_session(society) as db:
+        assert resolve.primary_resident(db, society, "A-101").name == "Neha Sharma"
+
+
+def test_an_explicit_primary_row_does_take_over_from_an_adopted_resident(society):
+    """...but saying so explicitly is exactly what is_primary_contact is for."""
+    _free_text_resident(society, "A-101", "Neha Sharma", primary=True)
+    _post(society, HEADER + "A,101,1,Ravi Kumar,,yes\n", dry_run=False)
+
+    with scoped_session(society) as db:
+        assert resolve.primary_resident(db, society, "A-101").name == "Ravi Kumar"
+        assert len(resolve.flat_residents(db, society, "A-101")) == 2
+
+
+def test_adoption_does_not_reach_an_unrelated_flat(society):
+    _free_text_resident(society, "A-999", "Someone Else")
+    _post(society, HEADER + "A,101,1,Ravi Kumar,,\n", dry_run=False)
+
+    with system_session() as db:
+        other = db.execute(select(m.Resident).where(
+            m.Resident.society_id == society, m.Resident.name == "Someone Else")).scalars().one()
+        assert other.flat_id is None
+
+
 def test_platform_admin_must_name_a_society(society):
     body = HEADER + "A,101,1,Priya Sharma,,yes\n"
     h = dict(PLATFORM); h["Content-Type"] = "text/csv"

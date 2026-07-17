@@ -85,6 +85,24 @@ def flat_for(db, society_id, flat_number: str):
     ).scalars().first()
 
 
+def has_primary(db, society_id, flat_number: str) -> bool:
+    """
+    Is anyone actually *flagged* the contact for this door?
+
+    Distinct from `primary_resident`, which always answers with somebody when the
+    flat has residents (it falls back to the oldest). Callers deciding whether to
+    appoint a contact need to know the difference: appointing one where a flag
+    already exists would depose a contact somebody chose.
+    """
+    return db.execute(
+        select(m.Resident.id).where(
+            m.Resident.society_id == society_id,
+            m.Resident.flat_number == flat_number,
+            m.Resident.is_primary,
+        )
+    ).first() is not None
+
+
 # ---------------------------------------------------------------------------
 # Maintaining the invariant
 #
@@ -93,6 +111,35 @@ def flat_for(db, society_id, flat_number: str):
 # resident between flats has to keep that index happy. One home for the rule
 # beats four routers each remembering it.
 # ---------------------------------------------------------------------------
+def link_exact_matches(db, society_id, flat) -> int:
+    """
+    Adopt the residents already sitting on this flat's code (D4).
+
+    Introducing a layout must not orphan anyone, so every path that brings a flat
+    into existence — typing one in (E4-S2), importing a file (E3), or the
+    reconcile sweep (E4-S4) — adopts the free-text residents already on its code.
+    It lives here rather than in a router so those paths can't drift apart.
+
+    Exact string match only: an inexact guess is a human's call (see the
+    reconcile report's suggestions). Never re-points a resident who is already
+    linked, so running it twice is a no-op rather than a reshuffle. Deliberately
+    does not touch `is_primary` — adopting somebody is not a reason to depose the
+    contact their door already had.
+    """
+    rows = db.execute(
+        select(m.Resident).where(
+            m.Resident.society_id == society_id,
+            m.Resident.flat_number == flat.code,
+            m.Resident.flat_id.is_(None),
+        )
+    ).scalars().all()
+    for resident in rows:
+        resident.flat_id = flat.id
+    if rows:
+        db.flush()
+    return len(rows)
+
+
 def ensure_primary(db, society_id, flat_number: str):
     """
     Guarantee a flat with residents has exactly one primary.

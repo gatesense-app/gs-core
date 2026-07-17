@@ -269,28 +269,6 @@ def delete_wing(wing_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_
 # ---------------------------------------------------------------------------
 # E4-S4 — reconcile free-text residents onto flats (D4)
 # ---------------------------------------------------------------------------
-def _link_exact_matches(db, society_id, flat: m.Flat) -> int:
-    """
-    Adopt the residents already sitting on this flat's code.
-
-    Exact string match only — an inexact guess is a human's call (see the
-    suggestion in the report). Never re-points a resident who is already linked,
-    so running this twice is a no-op rather than a reshuffle.
-    """
-    rows = db.execute(
-        select(m.Resident).where(
-            m.Resident.society_id == society_id,
-            m.Resident.flat_number == flat.code,
-            m.Resident.flat_id.is_(None),
-        )
-    ).scalars().all()
-    for resident in rows:
-        resident.flat_id = flat.id
-    if rows:
-        db.flush()
-    return len(rows)
-
-
 def _normalize(code: str) -> str:
     """`A-101`, `A 101` and `a101` are the same flat to a human. Nothing else is."""
     return re.sub(r"[^a-z0-9]", "", code.lower())
@@ -365,7 +343,7 @@ def reconcile_run(
     """
     sid = parse_uuid(resolve_society_id(user, society_id))
     for flat in db.execute(select(m.Flat).where(m.Flat.society_id == sid)).scalars().all():
-        _link_exact_matches(db, sid, flat)
+        resolve.link_exact_matches(db, sid, flat)
     return _build_report(db, sid)
 
 
@@ -472,7 +450,7 @@ def create_flat(body: FlatCreate, _: CurrentUser = Depends(_admins), db=Depends(
         raise HTTPException(409, f"Flat '{code}' already exists in this society")
 
     # D4: introducing a layout must not orphan anyone who was already here.
-    linked = _link_exact_matches(db, wing.society_id, flat)
+    linked = resolve.link_exact_matches(db, wing.society_id, flat)
     return _flat_resp(flat, wing.name, warnings, linked)
 
 

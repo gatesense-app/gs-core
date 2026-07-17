@@ -95,6 +95,7 @@ async def import_residents(
         total_rows=counts["total_rows"],
         residents_to_create=counts["residents_to_create"],
         residents_to_update=counts["residents_to_update"],
+        residents_to_link=counts["residents_to_link"],
         flats_to_create=counts["flats_to_create"],
         rejected_rows=counts["rejected_rows"],
         errors=errors,

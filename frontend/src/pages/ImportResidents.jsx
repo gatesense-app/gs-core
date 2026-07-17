@@ -148,6 +148,9 @@ export default function ImportResidents() {
               ['Rows read', report.total_rows],
               ['Residents created', report.residents_to_create],
               ['Residents updated', report.residents_to_update],
+              // Not in the file, but already living at a code it creates — the
+              // new flat adopts them instead of orphaning them.
+              ['Residents adopted', report.residents_to_link],
               ['Flats created', report.flats_to_create],
               ['Rows rejected', report.rejected_rows],
             ].map(([k, v]) => (

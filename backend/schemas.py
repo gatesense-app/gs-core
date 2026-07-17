@@ -213,6 +213,9 @@ class ImportReport(BaseModel):
     total_rows: int
     residents_to_create: int
     residents_to_update: int
+    # Residents not named in the file, already sitting on a code the import
+    # creates: a new flat adopts them (D4) rather than orphaning them.
+    residents_to_link: int = 0
     flats_to_create: int
     rejected_rows: int
     errors: list[ImportRowError] = Field(default_factory=list)
