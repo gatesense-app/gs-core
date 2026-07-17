@@ -19,7 +19,7 @@ from backend.routers.common import parse_uuid, resolve_society_id
 from backend.schemas import (
     FlatCreate,
     FlatResponse,
-    FlatRulesUpdate,
+    FlatUpdate,
     ReconcileLink,
     ReconcileReport,
     UnmatchedResident,
@@ -392,7 +392,7 @@ def reconcile_link(
 # ---------------------------------------------------------------------------
 # E4-S2 — flats
 # ---------------------------------------------------------------------------
-def _shape_warnings(db, wing: m.Wing, floor: int) -> list[str]:
+def _shape_warnings(db, wing: m.Wing, floor: int, exclude_flat_id=None) -> list[str]:
     """
     Q2: the declared shape is a hint, never a rule. Ground-floor shops and
     penthouses are normal, so we say something and save anyway.
@@ -403,9 +403,13 @@ def _shape_warnings(db, wing: m.Wing, floor: int) -> list[str]:
             f"Floor {floor} is above the {wing.floors} floor(s) declared for wing "
             f"'{wing.name}'. Saved anyway."
         )
-    on_floor = db.execute(
-        select(func.count(m.Flat.id)).where(m.Flat.wing_id == wing.id, m.Flat.floor == floor)
-    ).scalar_one()
+    # Count the flat's *neighbours*, so the "+1" below is this flat joining them.
+    # On a create it isn't inserted yet; on an edit it already is, so it has to
+    # be excluded or it would count itself twice.
+    q = select(func.count(m.Flat.id)).where(m.Flat.wing_id == wing.id, m.Flat.floor == floor)
+    if exclude_flat_id is not None:
+        q = q.where(m.Flat.id != exclude_flat_id)
+    on_floor = db.execute(q).scalar_one()
     if on_floor >= wing.flats_per_floor:
         warnings.append(
             f"Floor {floor} now has {on_floor + 1} flats; wing '{wing.name}' declares "
@@ -482,32 +486,138 @@ def get_flat(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)
     return _flat_resp(flat, db.get(m.Wing, flat.wing_id).name)
 
 
+def _recode_flat(db, flat: m.Flat, wing: m.Wing, new_number: str) -> list[str]:
+    """
+    Retype a flat's number, taking its household with it.
+
+    The code is the flat's identity: `residents.flat_number` matches it and the
+    agents resolve residents by that exact string, so the household is moved with
+    the code or the gate stops finding them. `visitor_sessions.flat_number` is
+    NOT rewritten — it records what a guard actually typed at the time, and a
+    record you can edit afterwards isn't a record. The cost is that past sessions
+    keep a code this flat no longer answers to; that's returned as a warning
+    rather than done quietly.
+    """
+    old_code = flat.code
+    new_code = f"{wing.name}-{new_number}"
+    if new_code == old_code:
+        return []
+
+    clash = db.execute(
+        select(m.Flat.id).where(
+            m.Flat.society_id == flat.society_id,
+            m.Flat.code == new_code,
+            m.Flat.id != flat.id,
+        )
+    ).first()
+    if clash:
+        raise HTTPException(409, f"Flat '{new_code}' already exists in this society")
+
+    warnings = []
+    history = db.execute(
+        select(func.count(m.VisitorSession.id)).where(
+            m.VisitorSession.society_id == flat.society_id,
+            m.VisitorSession.flat_number == old_code,
+        )
+    ).scalar_one()
+    if history:
+        warnings.append(
+            f"{history} past visitor session(s) recorded '{old_code}'. They keep that "
+            f"code as a record of what was typed, so they no longer match this flat."
+        )
+
+    movers = resolve.flat_residents(db, flat.society_id, old_code)
+    was_primary = next((r for r in movers if r.is_primary), None)
+
+    # Release before moving: the primary slot is unique per (society, flat_number),
+    # so carrying a flag onto a code someone already holds it for would trip the
+    # index mid-statement.
+    for r in movers:
+        r.is_primary = False
+    db.flush()
+    for r in movers:
+        r.flat_number = new_code
+    flat.flat_number = new_number
+    flat.code = new_code
+    db.flush()
+
+    if movers:
+        warnings.append(
+            f"{len(movers)} resident(s) moved to '{new_code}' so the gate still finds them."
+        )
+
+    # Settle both doors. If the destination already had a flagged contact — free
+    # text residents can live on a code before a flat does — they keep it, and
+    # this is a merge worth saying out loud. Otherwise restore whoever held it.
+    if was_primary is not None and not resolve.has_primary(db, flat.society_id, new_code):
+        resolve.claim_primary(db, was_primary)
+    else:
+        settled = resolve.ensure_primary(db, flat.society_id, new_code)
+        if was_primary is not None and settled is not None and settled.id != was_primary.id:
+            warnings.append(
+                f"'{new_code}' already had residents; {settled.name} stays the primary contact."
+            )
+    resolve.ensure_primary(db, flat.society_id, old_code)
+
+    # Anyone already living on the new code but never linked to a flat (D4).
+    resolve.link_exact_matches(db, flat.society_id, flat)
+    return warnings
+
+
 @router.patch("/flats/{flat_id}", response_model=FlatResponse)
-def update_flat_rules(
+def update_flat(
     flat_id: str,
-    body: FlatRulesUpdate,
+    body: FlatUpdate,
     _: CurrentUser = Depends(_admins),
     db=Depends(get_db),
 ):
     """
-    Set the standing rules / delivery preferences for a door (E6-S3).
+    Correct a flat — its number, its floor, or the rules at its door.
 
-    These override whatever its residents hold individually, which is the point:
-    two people behind one door can't be allowed to contradict each other about
-    who gets in. Sending null clears the override and hands the door back to its
-    primary contact's own rules.
+    `floor` is inert: it is stored, never inferred from the code (Q1), and
+    nothing resolves on it, so changing it only moves the flat on the grid.
+
+    `flat_number` changes the code, which is the flat's identity — see
+    `_recode_flat` for what moves with it and what deliberately doesn't.
+
+    Rules override whatever the residents hold individually (E6-S3): two people
+    behind one door can't contradict each other about who gets in. Sending null
+    clears the override and hands the door back to its primary contact's own.
     """
     flat = db.get(m.Flat, parse_uuid(flat_id))
-    if flat is None:
+    if flat is None:  # RLS hides other societies' rows -> looks like 404
         raise HTTPException(404, "Flat not found")
 
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(422, "Nothing to update")
-    for key, value in fields.items():
-        setattr(flat, key, value)
-    db.flush()
-    return _flat_resp(flat, db.get(m.Wing, flat.wing_id).name)
+
+    wing = db.get(m.Wing, flat.wing_id)
+    warnings: list[str] = []
+
+    if "floor" in fields:
+        if fields["floor"] is None:
+            raise HTTPException(422, "Floor is required")
+        flat.floor = fields["floor"]
+
+    if "flat_number" in fields:
+        new_number = (fields["flat_number"] or "").strip()
+        if not new_number:
+            raise HTTPException(422, "Flat number is required")
+        warnings += _recode_flat(db, flat, wing, new_number)
+
+    for key in ("standing_rules", "delivery_preferences"):
+        if key in fields:
+            setattr(flat, key, fields[key])
+
+    try:
+        db.flush()
+    except Exception:
+        raise HTTPException(409, "That flat code already exists in this society")
+
+    # Q2: the declared shape is a hint, so a moved flat warns rather than refuses.
+    warnings += _shape_warnings(db, wing, flat.floor, exclude_flat_id=flat.id)
+    return _flat_resp(flat, wing.name, warnings)
 
 
 @router.delete("/flats/{flat_id}", status_code=204)

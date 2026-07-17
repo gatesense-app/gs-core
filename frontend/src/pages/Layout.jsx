@@ -18,15 +18,15 @@ import { ui, colors } from '../ui'
 // now" — no realtime here on purpose. (See realtime.js; unused.)
 
 // Match residents onto flats by (society_id, code). A flat carries no resident
-// count, so we build a set of occupied keys from /residents. platform_admin's
-// /residents spans societies, hence society_id is part of the key.
+// count, so we derive both occupancy and the contact from /residents.
+// platform_admin's /residents spans societies, hence society_id is part of the key.
 function occKey(societyId, code) {
   return `${societyId}::${code}`
 }
 
 const flatCell = {
   display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'center',
-  flex: '0 0 auto', width: 84, minHeight: 56, padding: '8px 10px',
+  flex: '0 0 auto', width: 124, minHeight: 56, padding: '8px 10px',
   borderRadius: 10, textDecoration: 'none', boxSizing: 'border-box',
   border: '1px solid var(--c-border)',
 }
@@ -34,20 +34,31 @@ const flatState = {
   occupied: { background: 'var(--c-accent-bg)', borderColor: 'var(--c-accent-border)', color: 'var(--c-ok)' },
   vacant: { background: 'transparent', color: 'var(--c-muted)' },
 }
+// Names are longer than "Occupied" and vary wildly; clip rather than let one
+// long name stretch a floor into a horizontal scroll. The full name is in the
+// cell's title, and the flat detail page has it in full.
+const clip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
-function Flat({ flat, occupied }) {
-  const label = occupied ? 'Occupied' : 'Vacant'
+function Flat({ flat, contact, occupied }) {
+  // The primary contact is who the gate actually calls (E6-S3), which is more
+  // use on a grid than a yes/no. Every flat with residents has exactly one —
+  // the DB enforces at most one, and ensure_primary appoints one on every write
+  // path — so "no contact" means nobody lives here. `occupied` still guards the
+  // gap: were a flat ever to hold residents with nobody flagged, it must not be
+  // labelled Vacant, which would be a lie about an occupied home.
+  const label = contact || (occupied ? 'Occupied' : 'Vacant')
+  const filled = Boolean(contact || occupied)
   return (
     <Link
       to={`/flat/${flat.id}`}
-      style={{ ...flatCell, ...(occupied ? flatState.occupied : flatState.vacant) }}
-      title={`Flat ${flat.code} — ${label}`}
+      style={{ ...flatCell, ...(filled ? flatState.occupied : flatState.vacant) }}
+      title={contact ? `Flat ${flat.code} — primary contact ${contact}` : `Flat ${flat.code} — ${label}`}
     >
       <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)' }}>{flat.code}</span>
       {/* State is never colour-alone: a shape marker + a text label carry it too. */}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
-        <span aria-hidden="true">{occupied ? '●' : '○'}</span>
-        {label}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, minWidth: 0 }}>
+        <span aria-hidden="true" style={{ flex: '0 0 auto' }}>{filled ? '●' : '○'}</span>
+        <span style={clip}>{label}</span>
       </span>
     </Link>
   )
@@ -66,6 +77,7 @@ export default function Layout() {
   const [wingId, setWingId] = useState('')
   const [flats, setFlats] = useState([])
   const [occupied, setOccupied] = useState(() => new Set())
+  const [contacts, setContacts] = useState(() => new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -105,6 +117,7 @@ export default function Layout() {
     if (!wid) {
       setFlats([])
       setOccupied(new Set())
+      setContacts(new Map())
       return
     }
     setLoading(true)
@@ -115,6 +128,10 @@ export default function Layout() {
       ])
       setFlats(flatRows)
       setOccupied(new Set(residents.map((r) => occKey(r.society_id, r.flat_number))))
+      setContacts(new Map(
+        residents.filter((r) => r.is_primary)
+          .map((r) => [occKey(r.society_id, r.flat_number), r.name]),
+      ))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -469,7 +486,12 @@ export default function Layout() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {row.map((f) => (
-                    <Flat key={f.id} flat={f} occupied={occupied.has(occKey(f.society_id, f.code))} />
+                    <Flat
+                      key={f.id}
+                      flat={f}
+                      contact={contacts.get(occKey(f.society_id, f.code))}
+                      occupied={occupied.has(occKey(f.society_id, f.code))}
+                    />
                   ))}
                 </div>
               </div>

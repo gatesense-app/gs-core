@@ -145,13 +145,19 @@ class FlatResponse(BaseModel):
     delivery_preferences: Optional[dict[str, Any]] = None
 
 
-class FlatRulesUpdate(BaseModel):
+class FlatUpdate(BaseModel):
     """
-    Set the rules that apply at a door, overriding its residents' own (E6-S3).
+    Correct a flat: its number, its floor, or the rules that apply at its door.
 
-    Send null to clear an override and fall back to the primary contact again.
+    `standing_rules` / `delivery_preferences` override what its residents hold
+    individually (E6-S3); sending null clears the override and hands the door
+    back to the primary contact's own. Unset fields are left alone — the router
+    reads `exclude_unset`, so "not sent" and "sent as null" mean different things.
     """
 
+    # Changing this changes the flat's code, which is its identity. See the router.
+    flat_number: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    floor: Optional[int] = None
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
 

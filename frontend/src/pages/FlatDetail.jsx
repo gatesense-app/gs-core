@@ -85,6 +85,11 @@ export default function FlatDetail() {
   const [editPhone, setEditPhone] = useState('')
   // Remove confirmation: resident id awaiting a confirmed delete
   const [confirmId, setConfirmId] = useState(null)
+  // Edit the flat itself (number / floor), plus what the server left alone
+  const [editFlat, setEditFlat] = useState(false)
+  const [flatNumber, setFlatNumber] = useState('')
+  const [flatFloor, setFlatFloor] = useState('')
+  const [notice, setNotice] = useState([])
 
   async function load() {
     setError('')
@@ -117,6 +122,35 @@ export default function FlatDetail() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  function startEditFlat() {
+    setFlatNumber(flat.flat_number)
+    setFlatFloor(String(flat.floor))
+    setEditFlat(true)
+    setNotice([])
+  }
+
+  async function saveFlat(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      const updated = await apiFetch(`/flats/${id}`, {
+        method: 'PATCH',
+        body: { flat_number: flatNumber.trim(), floor: Number(flatFloor) },
+      })
+      setEditFlat(false)
+      // What the edit deliberately left alone: history keeping the old code, a
+      // merged household's contact, a floor now outside the declared shape.
+      setNotice(updated.warnings || [])
+      await load()
+    } catch (err) {
+      setError(err.message)   // e.g. that code already exists
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function addResident(e) {
     e.preventDefault()
@@ -241,6 +275,46 @@ export default function FlatDetail() {
             <div style={s.val}>{flat.floor}</div>
           </div>
         </div>
+
+        {!editFlat ? (
+          <button type="button" className="btn btn--ghost btn--sm" onClick={startEditFlat}>
+            Edit flat
+          </button>
+        ) : (
+          <form onSubmit={saveFlat}>
+            <div style={{ fontSize: 13, color: 'var(--c-muted)', marginBottom: 12 }}>
+              Retyping the number changes this flat’s code to{' '}
+              <code>{flat.wing_name}-{flatNumber || flat.flat_number}</code> and moves its
+              residents with it, so the gate still finds them. Past visitor sessions keep the
+              old code — they record what was actually typed at the time.
+            </div>
+            <div style={s.editForm}>
+              <div style={{ width: 140 }}>
+                <label style={ui.label}>Flat number</label>
+                <input className="input" value={flatNumber}
+                       onChange={(e) => setFlatNumber(e.target.value)} required />
+              </div>
+              <div style={{ width: 110 }}>
+                <label style={ui.label}>Floor</label>
+                <input className="input" type="number" value={flatFloor}
+                       onChange={(e) => setFlatFloor(e.target.value)} required />
+              </div>
+              <button className="btn btn--primary btn--sm" disabled={busy}>
+                {busy ? 'Saving…' : 'Save flat'}
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => setEditFlat(false)}>Cancel</button>
+            </div>
+          </form>
+        )}
+
+        {notice.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            {notice.map((n, i) => (
+              <div key={i} style={{ fontSize: 13, color: colors.sub }}>{n}</div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Residents */}
