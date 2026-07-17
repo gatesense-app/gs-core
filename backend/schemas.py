@@ -89,6 +89,19 @@ class WingCreate(BaseModel):
     society_id: Optional[str] = None  # platform_admin only
 
 
+class WingUpdate(BaseModel):
+    """
+    Correct a wing after the fact (E4-S3) — a typo shouldn't force a rebuild.
+
+    Renaming never rewrites existing flat codes, and changing the shape only
+    redraws the grid; neither touches a flat. See the router for why.
+    """
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    floors: Optional[int] = Field(default=None, ge=1)
+    flats_per_floor: Optional[int] = Field(default=None, ge=1)
+
+
 class WingResponse(BaseModel):
     id: str
     society_id: str
@@ -97,6 +110,9 @@ class WingResponse(BaseModel):
     flats_per_floor: int
     # Actual flats entered so far — the grid renders empty until they are.
     flat_count: int = 0
+    # E4-S3 / Q2: what an edit left alone but the admin should know about —
+    # kept codes after a rename, flats outside a reduced shape. Never a rejection.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class FlatCreate(BaseModel):

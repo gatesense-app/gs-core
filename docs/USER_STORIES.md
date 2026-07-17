@@ -277,6 +277,14 @@ Per **D2** this **declares the grid** — it does **not** create flats.
   refused (or needs explicit confirmation) when it has residents or visitor
   history — silently removing an occupied flat is unacceptable.
 
+**Settled:** `PATCH /wings/{id}` renames and reshapes; neither touches a flat.
+Existing codes are kept unconditionally, not just "once visitors exist" — the
+agents resolve residents by the same typed string history records, so there is no
+window in which rewriting a code is safe. The response returns **warnings** for
+what the edit deliberately left alone (codes kept after a rename; flats now
+outside a reduced shape), because a silent rename reads as if the codes had
+followed the name.
+
 ### E4-S4 — Reconcile existing free-text flats *(see D4)*
 > **As a** platform admin, **I want** existing residents matched to generated
 > flats, **so that** introducing a layout doesn't orphan anyone.

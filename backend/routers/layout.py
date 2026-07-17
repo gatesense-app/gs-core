@@ -25,6 +25,7 @@ from backend.schemas import (
     UnmatchedResident,
     WingCreate,
     WingResponse,
+    WingUpdate,
 )
 from backend.tools import resolve
 
@@ -45,7 +46,7 @@ def _flat_counts(db, wing_ids: list) -> dict:
     return {wid: count for wid, count in rows}
 
 
-def _wing_resp(w: m.Wing, flat_count: int) -> WingResponse:
+def _wing_resp(w: m.Wing, flat_count: int, warnings: list[str] | None = None) -> WingResponse:
     return WingResponse(
         id=str(w.id),
         society_id=str(w.society_id),
@@ -53,6 +54,7 @@ def _wing_resp(w: m.Wing, flat_count: int) -> WingResponse:
         floors=w.floors,
         flats_per_floor=w.flats_per_floor,
         flat_count=flat_count,
+        warnings=warnings or [],
     )
 
 
@@ -140,6 +142,111 @@ def list_wings(
 def get_wing(wing_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)):
     wing = _get_wing(db, wing_id)
     return _wing_resp(wing, _flat_counts(db, [wing.id]).get(wing.id, 0))
+
+
+# ---------------------------------------------------------------------------
+# E4-S3 — edit a wing after the fact
+# ---------------------------------------------------------------------------
+def _declared_shape_warnings(db, wing: m.Wing) -> list[str]:
+    """
+    Flats that no longer fit the declared shape (Q2).
+
+    Reducing the shape never deletes a flat, so a wing shrunk below its real
+    contents keeps everything and says so. Silence here would read as "nothing
+    happened" when in fact the grid now disagrees with reality.
+    """
+    warnings = []
+    above = db.execute(
+        select(func.count(m.Flat.id)).where(
+            m.Flat.wing_id == wing.id, m.Flat.floor > wing.floors
+        )
+    ).scalar_one()
+    if above:
+        warnings.append(
+            f"{above} flat(s) sit above the {wing.floors} floor(s) now declared. "
+            f"Nothing was deleted — they are kept and still drawn."
+        )
+    crowded = db.execute(
+        select(m.Flat.floor)
+        .where(m.Flat.wing_id == wing.id)
+        .group_by(m.Flat.floor)
+        .having(func.count(m.Flat.id) > wing.flats_per_floor)
+    ).scalars().all()
+    if crowded:
+        warnings.append(
+            f"{len(crowded)} floor(s) hold more than the {wing.flats_per_floor} "
+            f"flat(s) per floor now declared. Kept as they are — the shape is a hint."
+        )
+    return warnings
+
+
+@router.patch("/wings/{wing_id}", response_model=WingResponse)
+def update_wing(
+    wing_id: str,
+    body: WingUpdate,
+    _: CurrentUser = Depends(_admins),
+    db=Depends(get_db),
+):
+    """
+    Correct a wing: rename it, or change the shape of its grid.
+
+    **A rename does not rewrite existing flat codes.** `visitor_sessions`
+    records the flat string a guard typed at the time; rewriting `A-101` to
+    `B-101` would silently retitle history that already happened, and the agents
+    resolve residents by that same string. So existing flats keep their codes and
+    only new flats use the new name — the response says how many were kept.
+
+    Changing floors / flats-per-floor only redraws the grid: the declared shape
+    is a drawing hint (Q2), never a constraint, so reducing it cannot delete a
+    flat. Anything now outside the shape comes back as a warning.
+    """
+    wing = _get_wing(db, wing_id)
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(422, "Nothing to update")
+
+    warnings: list[str] = []
+    flat_count = _flat_counts(db, [wing.id]).get(wing.id, 0)
+
+    if "name" in fields:
+        new_name = fields["name"].strip()
+        if not new_name:
+            raise HTTPException(422, "Wing name is required")
+        if new_name != wing.name:
+            exists = db.execute(
+                select(m.Wing.id).where(
+                    m.Wing.society_id == wing.society_id,
+                    m.Wing.name == new_name,
+                    m.Wing.id != wing.id,
+                )
+            ).first()
+            if exists:
+                raise HTTPException(
+                    409, f"A wing named '{new_name}' already exists in this society"
+                )
+            if flat_count:
+                sample = db.execute(
+                    select(m.Flat.code).where(m.Flat.wing_id == wing.id).order_by(m.Flat.code)
+                ).scalars().first()
+                warnings.append(
+                    f"{flat_count} existing flat(s) keep their codes (e.g. {sample}) so "
+                    f"visitor history stays meaningful. Only new flats use '{new_name}'."
+                )
+            wing.name = new_name
+
+    if "floors" in fields:
+        wing.floors = fields["floors"]
+    if "flats_per_floor" in fields:
+        wing.flats_per_floor = fields["flats_per_floor"]
+
+    try:
+        db.flush()
+    except Exception:
+        # Lost a race against a concurrent rename to the same name.
+        raise HTTPException(409, "A wing with that name already exists in this society")
+
+    warnings += _declared_shape_warnings(db, wing)
+    return _wing_resp(wing, flat_count, warnings)
 
 
 @router.delete("/wings/{wing_id}", status_code=204)

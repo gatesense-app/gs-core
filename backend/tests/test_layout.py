@@ -150,6 +150,167 @@ def _society_row(society_id):
     return next(s for s in rows if s["id"] == str(society_id))
 
 
+# --- E4-S3: edit a wing after the fact -------------------------------------
+
+def test_renaming_a_wing_does_not_rewrite_existing_flat_codes(society):
+    """
+    The rule this story exists for. `visitor_sessions.flat_number` is the string
+    a guard typed at the time, and the agents still resolve residents by it —
+    rewriting A-101 to B-101 would retitle history that already happened.
+    """
+    wing = _wing(society, name="A")
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "B"
+
+    codes = [f["code"] for f in client.get("/flats", headers=_hdr(society)).json()]
+    assert codes == ["A-101"], "the existing flat keeps the code history knows it by"
+
+
+def test_a_renamed_wings_new_flats_use_the_new_name(society):
+    wing = _wing(society, name="A")
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+    client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+
+    r = client.post("/flats", headers=_hdr(society),
+                    json={"wing_id": wing["id"], "flat_number": "102", "floor": 1})
+    assert r.status_code == 201, r.text
+    assert r.json()["code"] == "B-102"
+
+    codes = sorted(f["code"] for f in client.get("/flats", headers=_hdr(society)).json())
+    assert codes == ["A-101", "B-102"], "old codes stay, new ones take the new name"
+
+
+def test_renaming_leaves_visitor_history_meaningful(society):
+    wing = _wing(society, name="A")
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+    with system_session() as db:
+        db.add(m.VisitorSession(society_id=society, visitor_name="Amit",
+                                flat_number="A-101", purpose="guest"))
+        db.flush()
+
+    client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+
+    with system_session() as db:
+        session = db.execute(
+            select(m.VisitorSession).where(m.VisitorSession.society_id == society)
+        ).scalars().one()
+        assert session.flat_number == "A-101"
+
+
+def test_renaming_says_which_codes_it_kept(society):
+    """A silent rename would look like the codes had followed the name."""
+    wing = _wing(society, name="A")
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+    assert any("A-101" in w and "keep their codes" in w for w in r.json()["warnings"])
+
+
+def test_renaming_an_empty_wing_warns_about_nothing(society):
+    wing = _wing(society, name="A")
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+    assert r.json()["warnings"] == []
+
+
+def test_renaming_to_an_existing_name_is_rejected(society):
+    _wing(society, name="A")
+    b = _wing(society, name="B")
+    r = client.patch(f"/wings/{b['id']}", headers=_hdr(society), json={"name": "A"})
+    assert r.status_code == 409
+    assert client.get(f"/wings/{b['id']}", headers=_hdr(society)).json()["name"] == "B"
+
+
+def test_renaming_a_wing_to_its_own_name_is_fine(society):
+    wing = _wing(society, name="A")
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "A"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "A"
+
+
+def test_the_same_new_name_in_another_society_is_fine(society, other_society):
+    _wing(other_society, name="B")
+    wing = _wing(society, name="A")
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"name": "B"})
+    assert r.status_code == 200
+
+
+def test_changing_the_shape_only_redraws_the_grid(society):
+    wing = _wing(society, name="A", floors=10, per_floor=4)
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society),
+                     json={"floors": 3, "flats_per_floor": 8})
+    assert r.status_code == 200
+    assert (r.json()["floors"], r.json()["flats_per_floor"]) == (3, 8)
+
+    flats = client.get("/flats", headers=_hdr(society)).json()
+    assert len(flats) == 1 and flats[0]["code"] == "A-101" and flats[0]["floor"] == 1
+
+
+def test_reducing_the_shape_never_deletes_flats(society):
+    """Q2: the shape is a hint. Shrinking it below reality keeps every flat."""
+    wing = _wing(society, name="A", floors=10, per_floor=4)
+    for n, fl in (("101", 1), ("102", 1), ("901", 9)):
+        client.post("/flats", headers=_hdr(society),
+                    json={"wing_id": wing["id"], "flat_number": n, "floor": fl})
+
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society),
+                     json={"floors": 2, "flats_per_floor": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["flat_count"] == 3, "not one flat was removed"
+    assert len(client.get("/flats", headers=_hdr(society)).json()) == 3
+
+    warnings = " ".join(r.json()["warnings"])
+    assert "above the 2 floor(s)" in warnings   # A-901 is outside the new height
+    assert "more than the 1 flat(s)" in warnings  # floor 1 holds two
+
+
+def test_a_shape_that_still_fits_warns_about_nothing(society):
+    wing = _wing(society, name="A", floors=10, per_floor=4)
+    client.post("/flats", headers=_hdr(society),
+                json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+    r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={"floors": 5})
+    assert r.json()["warnings"] == []
+
+
+def test_empty_wing_update_is_rejected(society):
+    wing = _wing(society, name="A")
+    assert client.patch(f"/wings/{wing['id']}", headers=_hdr(society), json={}).status_code == 422
+
+
+def test_a_zero_floor_wing_is_rejected(society):
+    wing = _wing(society, name="A")
+    assert client.patch(f"/wings/{wing['id']}", headers=_hdr(society),
+                        json={"floors": 0}).status_code == 422
+
+
+def test_society_admin_cannot_edit_another_societys_wing(society, other_society):
+    theirs = _wing(other_society, name="Theirs")
+    r = client.patch(f"/wings/{theirs['id']}", headers=_hdr(society), json={"name": "Mine"})
+    assert r.status_code == 404, "RLS hides it entirely"
+
+
+def test_editing_an_unknown_wing_is_404(society):
+    r = client.patch("/wings/00000000-0000-0000-0000-0000000000ff",
+                     headers=_hdr(society), json={"name": "Ghost"})
+    assert r.status_code == 404
+
+
+def test_guards_and_residents_cannot_edit_wings(society):
+    wing = _wing(society, name="A")
+    for role in ("guard", "resident"):
+        r = client.patch(f"/wings/{wing['id']}", headers=_hdr(society, role),
+                         json={"name": "Nope"})
+        assert r.status_code == 403, role
+
+
 # --- E4-S2: add a flat -----------------------------------------------------
 
 def test_flat_code_is_wing_plus_typed_number(society):
@@ -173,7 +334,10 @@ def test_floor_is_stored_not_parsed_from_the_code(society):
     assert r.json()["floor"] == 7, "floor must be the one given, not derived from '101'"
 
     with system_session() as db:
-        flat = db.execute(select(m.Flat).where(m.Flat.code == "A-101")).scalars().one()
+        # Scoped to this society: system_session bypasses RLS, so an unscoped
+        # code lookup would also match any other society's A-101.
+        flat = db.execute(select(m.Flat).where(
+            m.Flat.society_id == society, m.Flat.code == "A-101")).scalars().one()
         assert flat.floor == 7
 
 

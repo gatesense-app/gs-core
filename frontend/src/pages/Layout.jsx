@@ -71,8 +71,10 @@ export default function Layout() {
 
   // Management (E4-S1/S2)
   const [wingForm, setWingForm] = useState(emptyWing)
+  const [editForm, setEditForm] = useState(emptyWing)
   const [flatForm, setFlatForm] = useState(emptyFlat)
   const [showAddWing, setShowAddWing] = useState(false)
+  const [showEditWing, setShowEditWing] = useState(false)
   const [showAddFlat, setShowAddFlat] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState([])   // Q2 warnings / adoption feedback
@@ -153,6 +155,44 @@ export default function Layout() {
       // E4-S1: the new building is drawn immediately — as an empty grid, because
       // declaring a wing creates no flats (D2).
       setWingId(created.id)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function startEditWing() {
+    setEditForm({
+      name: wing?.name ?? '',
+      floors: String(wing?.floors ?? ''),
+      flats_per_floor: String(wing?.flats_per_floor ?? ''),
+    })
+    setShowEditWing(true)
+    setShowAddFlat(false)
+    setNotice([])
+  }
+
+  async function saveWing(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      const updated = await apiFetch(`/wings/${wingId}`, {
+        method: 'PATCH',
+        body: {
+          name: editForm.name.trim(),
+          floors: Number(editForm.floors),
+          flats_per_floor: Number(editForm.flats_per_floor),
+        },
+      })
+      setShowEditWing(false)
+      // E4-S3: what the edit deliberately left alone — kept codes after a
+      // rename, flats now outside a reduced shape. Never a rejection.
+      setNotice(updated.warnings || [])
+      await loadWings()
+      await loadFlats(wingId)   // the grid redraws; the flats don't move
     } catch (err) {
       setError(err.message)
     } finally {
@@ -324,8 +364,12 @@ export default function Layout() {
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setShowAddFlat((v) => !v)}>
               {showAddFlat ? 'Cancel' : 'Add flat'}
             </button>
-            {/* No PATCH /wings yet (E4-S3), so deleting is the only way to undo a
-                typo'd name. The server refuses once the wing has flats. */}
+            <button type="button" className="btn btn--ghost btn--sm"
+                    onClick={() => (showEditWing ? setShowEditWing(false) : startEditWing())}>
+              {showEditWing ? 'Cancel' : 'Edit building'}
+            </button>
+            {/* Deleting stays available for a wing declared entirely by mistake;
+                the server refuses once it has flats. */}
             {flats.length === 0 && !confirmWing && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmWing(true)}>
                 Delete building
@@ -339,6 +383,38 @@ export default function Layout() {
               </span>
             )}
           </div>
+
+          {showEditWing && (
+            <form style={ui.card} onSubmit={saveWing}>
+              <div style={{ ...ui.label, fontSize: 14, color: colors.text, marginBottom: 4 }}>
+                Edit {wing?.name}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginBottom: 14 }}>
+                Renaming is safe: existing flats keep their codes, so a visitor logged at{' '}
+                <code>{wing?.name}-101</code> still means that flat. Only new flats use the new
+                name. Changing floors or flats-per-floor just redraws the grid — reducing it
+                never deletes a flat.
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div style={{ width: 160 }}>
+                  <label style={ui.label}>Name</label>
+                  <input className="input" value={editForm.name}
+                         onChange={set(setEditForm, 'name')} required />
+                </div>
+                <div style={{ width: 110 }}>
+                  <label style={ui.label}>Floors</label>
+                  <input className="input" type="number" min="1" value={editForm.floors}
+                         onChange={set(setEditForm, 'floors')} required />
+                </div>
+                <div style={{ width: 130 }}>
+                  <label style={ui.label}>Flats / floor</label>
+                  <input className="input" type="number" min="1" value={editForm.flats_per_floor}
+                         onChange={set(setEditForm, 'flats_per_floor')} required />
+                </div>
+                <button className="btn btn--primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+              </div>
+            </form>
+          )}
 
           {showAddFlat && (
             <form style={ui.card} onSubmit={addFlat}>
