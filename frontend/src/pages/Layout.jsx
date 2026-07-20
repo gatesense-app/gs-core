@@ -24,11 +24,17 @@ function occKey(societyId, code) {
   return `${societyId}::${code}`
 }
 
+// The cell is a container, not the link itself: it holds a link *and* a remove
+// button, and a <button> nested inside an <a> is invalid and unreachable by
+// keyboard. The link fills the cell; the button sits in its corner.
 const flatCell = {
+  position: 'relative', flex: '0 0 auto', width: 124, minHeight: 56,
+  borderRadius: 10, boxSizing: 'border-box', border: '1px solid var(--c-border)',
+}
+const cellLink = {
   display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'center',
-  flex: '0 0 auto', width: 124, minHeight: 56, padding: '8px 10px',
-  borderRadius: 10, textDecoration: 'none', boxSizing: 'border-box',
-  border: '1px solid var(--c-border)',
+  height: '100%', padding: '8px 10px', borderRadius: 10,
+  textDecoration: 'none', boxSizing: 'border-box',
 }
 const flatState = {
   occupied: { background: 'var(--c-accent-bg)', borderColor: 'var(--c-accent-border)', color: 'var(--c-ok)' },
@@ -39,7 +45,7 @@ const flatState = {
 // cell's title, and the flat detail page has it in full.
 const clip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
-function Flat({ flat, contact, occupied }) {
+function Flat({ flat, contact, occupied, onDelete }) {
   // The primary contact is who the gate actually calls (E6-S3), which is more
   // use on a grid than a yes/no. Every flat with residents has exactly one —
   // the DB enforces at most one, and ensure_primary appoints one on every write
@@ -49,18 +55,30 @@ function Flat({ flat, contact, occupied }) {
   const label = contact || (occupied ? 'Occupied' : 'Vacant')
   const filled = Boolean(contact || occupied)
   return (
-    <Link
-      to={`/flat/${flat.id}`}
-      style={{ ...flatCell, ...(filled ? flatState.occupied : flatState.vacant) }}
-      title={contact ? `Flat ${flat.code} — primary contact ${contact}` : `Flat ${flat.code} — ${label}`}
-    >
-      <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)' }}>{flat.code}</span>
-      {/* State is never colour-alone: a shape marker + a text label carry it too. */}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, minWidth: 0 }}>
-        <span aria-hidden="true" style={{ flex: '0 0 auto' }}>{filled ? '●' : '○'}</span>
-        <span style={clip}>{label}</span>
-      </span>
-    </Link>
+    <div style={{ ...flatCell, ...(filled ? flatState.occupied : flatState.vacant) }}>
+      <Link
+        to={`/flat/${flat.id}`}
+        style={cellLink}
+        title={contact ? `Flat ${flat.code} — primary contact ${contact}` : `Flat ${flat.code} — ${label}`}
+      >
+        <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)', paddingRight: 14 }}>{flat.code}</span>
+        {/* State is never colour-alone: a shape marker + a text label carry it too. */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, minWidth: 0 }}>
+          <span aria-hidden="true" style={{ flex: '0 0 auto' }}>{filled ? '●' : '○'}</span>
+          <span style={clip}>{label}</span>
+        </span>
+      </Link>
+      {/* Asks rather than deletes: the confirm names the flat outside the cell,
+          where there is room to say what is about to happen. */}
+      <button
+        type="button"
+        className="chip-x"
+        aria-label={`Delete flat ${flat.code}`}
+        title={`Delete flat ${flat.code}`}
+        style={{ position: 'absolute', top: 4, right: 4 }}
+        onClick={() => onDelete(flat)}
+      >×</button>
+    </div>
   )
 }
 
@@ -91,6 +109,7 @@ export default function Layout() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState([])   // Q2 warnings / adoption feedback
   const [confirmWing, setConfirmWing] = useState(false)
+  const [confirmFlat, setConfirmFlat] = useState(null)
 
   // society_admin's society comes from the JWT; platform_admin must name one.
   const sq = isPlatform ? societyId : ''
@@ -242,6 +261,25 @@ export default function Layout() {
       await loadFlats(wingId)
     } catch (err) {
       setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteFlat() {
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      await apiFetch(`/flats/${confirmFlat.id}`, { method: 'DELETE' })
+      setConfirmFlat(null)
+      await loadFlats(wingId)
+    } catch (err) {
+      // The server refuses a flat with residents or visitor history — removing
+      // an occupied home, or orphaning the sessions logged against it, is not
+      // something to do on a grid click. Show its reason verbatim.
+      setError(err.message)
+      setConfirmFlat(null)
     } finally {
       setBusy(false)
     }
@@ -459,6 +497,23 @@ export default function Layout() {
             </form>
           )}
 
+          {confirmFlat && (
+            <div style={{ ...ui.card, padding: 14, display: 'flex', gap: 10,
+                          alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14, color: colors.text }}>
+                Delete flat <code>{confirmFlat.code}</code>?
+              </span>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                A flat with residents or visitor history can’t be deleted.
+              </span>
+              <button type="button" className="btn btn--sm" disabled={busy} onClick={deleteFlat}>
+                {busy ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => setConfirmFlat(null)}>Cancel</button>
+            </div>
+          )}
+
           {notice.length > 0 && (
             <div style={{ ...ui.card, padding: 14, borderColor: 'var(--c-accent-border)' }}>
               {notice.map((n, i) => (
@@ -491,6 +546,7 @@ export default function Layout() {
                       flat={f}
                       contact={contacts.get(occKey(f.society_id, f.code))}
                       occupied={occupied.has(occKey(f.society_id, f.code))}
+                      onDelete={(target) => { setError(''); setConfirmFlat(target) }}
                     />
                   ))}
                 </div>
