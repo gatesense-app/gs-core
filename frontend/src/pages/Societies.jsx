@@ -20,6 +20,13 @@ function createPayload(form) {
 const s = {
   hint: { fontSize: 12, color: 'var(--c-muted)', marginTop: -6, marginBottom: 14 },
   legend: { ...ui.label, fontSize: 13, color: 'var(--c-text)', fontWeight: 600, marginTop: 8, marginBottom: 10 },
+  // The create form collapses so the societies table is what you land on.
+  // <summary> is the always-visible header/toggle; it's keyboard-operable natively.
+  summary: {
+    cursor: 'pointer', fontSize: 14, fontWeight: 600, color: 'var(--c-text)',
+    display: 'flex', alignItems: 'center', gap: 8, userSelect: 'none',
+  },
+  summaryHint: { fontWeight: 400, fontSize: 13, color: 'var(--c-muted)' },
   // Status is never colour-only: the chip always carries its word.
   noAdmin: {
     display: 'inline-block', padding: '2px 9px', borderRadius: 99, fontSize: 12, fontWeight: 600,
@@ -98,8 +105,13 @@ export default function Societies() {
       <h1 className="page-title">Societies</h1>
       <div style={ui.sub}>Onboard a society now; its administrator can be allocated at any time.</div>
 
-      <form style={ui.card} onSubmit={create}>
-        <div style={{ ...ui.label, fontSize: 14, color: 'var(--c-text)', marginBottom: 14 }}>New society</div>
+      <details style={ui.card}>
+        <summary style={s.summary}>
+          <span className="disclosure" aria-hidden="true" style={{ fontSize: 12, display: 'inline-block' }}>▸</span>
+          New society
+          <span style={s.summaryHint}>— add a society and, optionally, its first admin</span>
+        </summary>
+        <form style={{ marginTop: 16 }} onSubmit={create}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
             <label style={ui.label} htmlFor="soc-name">Society name</label>
@@ -138,7 +150,8 @@ export default function Societies() {
         </div>
         <button className="btn btn--primary" disabled={busy}>{busy ? 'Creating…' : 'Create society'}</button>
         {error && <div style={ui.error} role="alert">{error}</div>}
-      </form>
+        </form>
+      </details>
 
       <div className="table-wrap">
         <table style={ui.table}>

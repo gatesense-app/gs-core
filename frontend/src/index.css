@@ -219,6 +219,13 @@ h1, h2, h3 { color: var(--c-text); line-height: 1.25; font-weight: 700; }
   margin-bottom: 14px;
 }
 
+/* Collapsible <details>: hide the browser's default marker (we render our own
+   ▸) and turn it a quarter-turn when open so the state reads at a glance. */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+.disclosure { transition: transform 0.15s ease; }
+details[open] > summary .disclosure { transform: rotate(90deg); }
+
 /* ---------------------------------------------------------------------------
    App nav.
    Was a no-wrap flex row: at 375px a society_admin's 5 links + email + Sign out
