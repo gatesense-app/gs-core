@@ -86,7 +86,7 @@ async def import_residents(
 
     committed = False
     if not dry_run and not errors:
-        csv_import.apply_plan(db, sid, result["plan"])
+        csv_import.apply_plan(db, sid, result["plan"], user=user)
         committed = True
 
     return ImportReport(

@@ -33,6 +33,7 @@ import os
 
 from sqlalchemy import select
 
+from backend import audit
 from backend import db_models as m
 from backend.tools import resolve
 
@@ -158,7 +159,8 @@ def validate(db, society_id, rows: list[dict]) -> dict:
     existing_flats = {
         f.code: f
         for f in db.execute(
-            select(m.Flat).where(m.Flat.society_id == society_id)
+            select(m.Flat).where(
+                m.Flat.society_id == society_id, m.Flat.deleted_at.is_(None))
         ).scalars().all()
     }
 
@@ -286,13 +288,16 @@ def validate(db, society_id, rows: list[dict]) -> dict:
     }
 
 
-def apply_plan(db, society_id, plan: dict) -> None:
+def apply_plan(db, society_id, plan: dict, user=None) -> None:
     """
     Write a validated plan in the caller's transaction (E3-S1).
 
     Assumes `validate` returned no errors — a plan with rejected rows is never
     applied. Creates missing flats, upserts residents by natural key, then
-    settles exactly one primary per touched flat.
+    settles exactly one primary per touched flat. Each change is recorded on the
+    timeline (audit) so an import reads there exactly like the same edits done by
+    hand — the path that created a flat or a resident is not something anyone
+    should be able to feel afterwards.
     """
     wings = plan["wings"]
     flats = dict(plan["existing_flats"])
@@ -312,7 +317,16 @@ def apply_plan(db, society_id, plan: dict) -> None:
         db.add(flat)
         db.flush()
         flats[code] = flat
-        resolve.link_exact_matches(db, society_id, flat)
+        linked = resolve.link_exact_matches(db, society_id, flat)
+        summary = f"Flat {code} added on floor {flat.floor} (imported)"
+        if linked:
+            summary += f", adopting {linked} existing resident(s)"
+        audit.record(
+            db, society_id=society_id, user=user, action="flat_created",
+            summary=summary, entity_type=audit.FLAT, entity_id=flat.id,
+            flat_id=flat.id, flat_code=code,
+            detail={"floor": flat.floor, "linked_residents": linked, "via": "import"},
+        )
 
     # 2. Residents: update the ones we already have, create the rest, and link
     #    each to its flat so the layout and the agents agree. Keep each row's
@@ -324,7 +338,8 @@ def apply_plan(db, society_id, plan: dict) -> None:
         flat = flats[vr["code"]]
         key = (vr["code"], vr["name"].lower())
         resident = existing.get(key)
-        if resident is None:
+        is_new = resident is None
+        if is_new:
             resident = m.Resident(
                 society_id=society_id, flat_number=vr["code"], name=neutralize(vr["name"]),
             )
@@ -335,6 +350,14 @@ def apply_plan(db, society_id, plan: dict) -> None:
             resident.phone = vr["phone"]
         db.flush()
         resident_by_line[vr["line"]] = resident
+        audit.record(
+            db, society_id=society_id, user=user,
+            action="resident_added" if is_new else "resident_edited",
+            summary=f"{resident.name} {'added to' if is_new else 'updated on'} "
+                    f"{vr['code']} (imported)",
+            entity_type=audit.RESIDENT, entity_id=resident.id,
+            flat_id=flat.id, flat_code=vr["code"],
+        )
 
     # The first row for each flat, in file order — Q3's tiebreak when no row is
     # marked. It has to be explicit: rows imported in one transaction share a
@@ -372,9 +395,16 @@ def _wing_for(wings: dict, code: str):
 
 
 def _resident_index(db, society_id) -> dict:
-    """(code, lower(name)) -> Resident, for natural-key upsert."""
+    """
+    (code, lower(name)) -> live Resident, for natural-key upsert.
+
+    Soft-deleted residents are excluded: re-importing a removed person creates a
+    fresh resident rather than resurrecting a deleted one — restore is a separate,
+    deliberate action, not a side effect of an import (there is no restore yet).
+    """
     rows = db.execute(
-        select(m.Resident).where(m.Resident.society_id == society_id)
+        select(m.Resident).where(
+            m.Resident.society_id == society_id, m.Resident.deleted_at.is_(None))
     ).scalars().all()
     return {(r.flat_number, r.name.lower()): r for r in rows}
 

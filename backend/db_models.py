@@ -88,7 +88,15 @@ class Flat(Base):
 
     __tablename__ = "flats"
     __table_args__ = (
-        UniqueConstraint("society_id", "code", name="uq_flats_society_code"),
+        # Partial: a soft-deleted flat keeps its row (for history) but frees its
+        # code, so the same A-101 can be created again later. Without the
+        # deleted_at filter the deleted row would forever block re-use.
+        Index(
+            "uq_flats_society_code",
+            "society_id", "code",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id = _pk()
@@ -97,6 +105,11 @@ class Flat(Base):
     flat_number = Column(String(32), nullable=False)
     floor = Column(Integer, nullable=False)
     code = Column(String(64), nullable=False)
+    # Soft delete: deleting a flat sets this rather than removing the row, so its
+    # history (and its residents') is never lost. Every user-facing read filters
+    # deleted_at IS NULL; resolve.py does too, so the gate never reaches a
+    # deleted flat. See backend/audit.py for the trail.
+    deleted_at = Column(DateTime(timezone=True))
     # E6-S3: rules belong to the door, not to whoever happens to live behind it —
     # two residents must not hold contradictory rules for one flat.
     #
@@ -118,15 +131,16 @@ class Resident(Base):
 
     __tablename__ = "residents"
     __table_args__ = (
-        # At most one primary per flat, enforced by Postgres rather than by
-        # hope. Keyed on flat_number (not flat_id) because it must hold in both
-        # worlds: today nearly every resident has flat_id NULL, and the agents
-        # resolve on this string until the layout is reconciled.
+        # At most one *live* primary per flat, enforced by Postgres rather than
+        # by hope. Keyed on flat_number (not flat_id) because it must hold in
+        # both worlds: today nearly every resident has flat_id NULL, and the
+        # agents resolve on this string until the layout is reconciled. The
+        # deleted_at clause lets a soft-deleted primary step aside for a live one.
         Index(
             "uq_residents_primary_per_flat",
             "society_id", "flat_number",
             unique=True,
-            postgresql_where=text("is_primary"),
+            postgresql_where=text("is_primary AND deleted_at IS NULL"),
         ),
     )
 
@@ -146,6 +160,9 @@ class Resident(Base):
     standing_rules = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     # e.g. {"auto_log_daytime": true, "notify_after_hours": true}
     delivery_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # Soft delete: removing a resident sets this, keeping the row for history.
+    # resolve.py filters it out, so a removed resident is invisible to the gate.
+    deleted_at = Column(DateTime(timezone=True))
     created_at = _created_at()
 
 
@@ -240,12 +257,46 @@ class NotificationDeliveryLog(Base):
     created_at = _created_at()
 
 
+class LayoutEvent(Base):
+    """
+    An append-only record of a change to a flat or its residents (the timeline).
+
+    Immutable by convention: rows are inserted, never updated or deleted, so the
+    history stays trustworthy. Actor and flat code are *snapshotted* onto the row
+    rather than joined at read time — the admin who acted may later be removed,
+    and a flat's code can change, but "who did what, and to which flat, when"
+    must still read correctly years later.
+
+    `flat_id` / `entity_id` carry no foreign keys on purpose: an event outlives
+    what it describes, and a FK would either block a future hard cleanup or drag
+    the event down with a CASCADE. The rows are soft-deleted anyway, so the
+    references stay resolvable in practice.
+    """
+
+    __tablename__ = "layout_events"
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    # The flat this event belongs to on its timeline (may be a resident action).
+    flat_id = Column(_UUID)
+    flat_code = Column(String(64))  # snapshot, so the timeline reads after a rename
+    entity_type = Column(String(16), nullable=False)  # flat | resident
+    entity_id = Column(_UUID, nullable=False)
+    action = Column(String(40), nullable=False)  # flat_created | resident_deleted | ...
+    summary = Column(Text, nullable=False)       # human-readable, built server-side
+    detail = Column(JSONB)                        # structured before/after, optional
+    actor_user_id = Column(_UUID)                 # who did it (no FK: see docstring)
+    actor_email = Column(String(255))             # snapshot of the actor's email
+    created_at = _created_at()
+
+
 # Tables that get RLS. `societies` filters on its own `id`; the rest on society_id.
 TENANT_TABLES = [
     "societies",
     "wings",
     "flats",
     "residents",
+    "layout_events",
     "users",
     "visitors",
     "visitor_sessions",

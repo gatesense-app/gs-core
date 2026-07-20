@@ -8,7 +8,7 @@ Regenerate with:
 python -m backend.eval.run_eval
 ```
 
-- **Run:** 2026-07-16T06:50:33+00:00
+- **Run:** 2026-07-20T05:29:17+00:00
 - **Result:** 23/23 passed (100%)
 
 | Scenario | Expected | Actual | Agents | Result |

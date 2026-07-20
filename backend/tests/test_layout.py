@@ -11,7 +11,7 @@ flats, and neither wings nor flats leak across societies.
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from backend import db_models as m
 from backend.deps import scoped_session, system_session
@@ -613,32 +613,62 @@ def test_guards_and_residents_cannot_edit_flats(society):
         assert r.status_code == 403, role
 
 
-# --- Deleting: never silently drop something occupied ----------------------
+# --- Deleting is soft: the flat and its household are kept as history --------
 
-def test_deleting_a_flat_with_residents_is_refused(society):
+def test_deleting_an_occupied_flat_cascades_a_soft_delete(society):
+    """
+    The old refusal is gone: soft delete loses nothing, so an occupied flat can
+    be removed and takes its residents with it — both kept, both invisible.
+    """
     wing = _wing(society, name="A")
-    flat = client.post("/flats", headers=_hdr(society),
-                       json={"wing_id": wing["id"], "flat_number": "101", "floor": 1}).json()
+    flat = _flat(society, wing, "101", floor=1)
+    for name in ("Priya Sharma", "Rohit Sharma"):
+        client.post("/residents", headers=_hdr(society),
+                    json={"flat_number": "A-101", "name": name})
+
+    assert client.delete(f"/flats/{flat['id']}", headers=_hdr(society)).status_code == 204
+
+    # Gone from every live view...
+    assert client.get("/flats", headers=_hdr(society)).json() == []
+    assert client.get("/residents", headers=_hdr(society)).json() == []
+    # ...and gone from the gate: resolve must not reach a deleted flat's people.
+    with scoped_session(society) as db:
+        assert resolve.primary_resident(db, society, "A-101") is None
+        assert resolve.flat_for(db, society, "A-101") is None
+    # ...but the rows survive for history.
     with system_session() as db:
-        db.add(m.Resident(society_id=society, flat_number="A-101",
-                          name="Priya Sharma", flat_id=flat["id"]))
-        db.flush()
-
-    r = client.delete(f"/flats/{flat['id']}", headers=_hdr(society))
-    assert r.status_code == 409
-    assert client.get(f"/flats/{flat['id']}", headers=_hdr(society)).status_code == 200
+        assert db.execute(select(m.Flat).where(
+            m.Flat.society_id == society)).scalars().one().deleted_at is not None
+        assert db.execute(select(func.count(m.Resident.id)).where(
+            m.Resident.society_id == society,
+            m.Resident.deleted_at.is_not(None))).scalar_one() == 2
 
 
-def test_deleting_a_flat_with_visitor_history_is_refused(society):
+def test_deleting_a_flat_with_visitor_history_is_allowed_now(society):
     wing = _wing(society, name="A")
-    flat = client.post("/flats", headers=_hdr(society),
-                       json={"wing_id": wing["id"], "flat_number": "101", "floor": 1}).json()
+    flat = _flat(society, wing, "101", floor=1)
     with system_session() as db:
         db.add(m.VisitorSession(society_id=society, visitor_name="Amit",
                                 flat_number="A-101", purpose="guest"))
         db.flush()
 
-    assert client.delete(f"/flats/{flat['id']}", headers=_hdr(society)).status_code == 409
+    assert client.delete(f"/flats/{flat['id']}", headers=_hdr(society)).status_code == 204
+    # History is untouched — the session still records what was typed.
+    with system_session() as db:
+        assert db.execute(select(m.VisitorSession).where(
+            m.VisitorSession.society_id == society)).scalars().one().flat_number == "A-101"
+
+
+def test_a_deleted_code_can_be_created_again(society):
+    """Soft delete frees the code; the new flat is a fresh row with its own life."""
+    wing = _wing(society, name="A")
+    first = _flat(society, wing, "101", floor=1)
+    assert client.delete(f"/flats/{first['id']}", headers=_hdr(society)).status_code == 204
+
+    r = client.post("/flats", headers=_hdr(society),
+                    json={"wing_id": wing["id"], "flat_number": "101", "floor": 1})
+    assert r.status_code == 201, r.text
+    assert r.json()["id"] != first["id"], "a distinct flat, not the resurrected one"
 
 
 def test_an_empty_flat_can_be_deleted(society):

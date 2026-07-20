@@ -30,12 +30,15 @@ from backend import db_models as m
 
 
 def _residents_q(society_id, flat_number):
-    """Every resident of a flat, in a stable, total order."""
+    """Every *live* resident of a flat, in a stable, total order."""
     return (
         select(m.Resident)
         .where(
             m.Resident.society_id == society_id,
             m.Resident.flat_number == flat_number,
+            # A soft-deleted resident is gone as far as the gate is concerned;
+            # this is the one filter that keeps a removed person unreachable.
+            m.Resident.deleted_at.is_(None),
         )
         # is_primary first, then oldest. The id tiebreak makes this a total
         # order: created_at can collide (a CSV import writes many rows in one
@@ -76,11 +79,12 @@ def other_flat_residents(db, society_id, flat_number: str, exclude_id) -> list:
 
 
 def flat_for(db, society_id, flat_number: str):
-    """The Flat whose code is this string, or None if there's no layout yet."""
+    """The live Flat whose code is this string, or None if there's no layout yet."""
     return db.execute(
         select(m.Flat).where(
             m.Flat.society_id == society_id,
             m.Flat.code == flat_number,
+            m.Flat.deleted_at.is_(None),
         )
     ).scalars().first()
 
@@ -99,6 +103,7 @@ def has_primary(db, society_id, flat_number: str) -> bool:
             m.Resident.society_id == society_id,
             m.Resident.flat_number == flat_number,
             m.Resident.is_primary,
+            m.Resident.deleted_at.is_(None),
         )
     ).first() is not None
 
@@ -131,6 +136,7 @@ def link_exact_matches(db, society_id, flat) -> int:
             m.Resident.society_id == society_id,
             m.Resident.flat_number == flat.code,
             m.Resident.flat_id.is_(None),
+            m.Resident.deleted_at.is_(None),  # don't resurrect a removed resident
         )
     ).scalars().all()
     for resident in rows:

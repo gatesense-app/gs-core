@@ -275,9 +275,8 @@ export default function Layout() {
       setConfirmFlat(null)
       await loadFlats(wingId)
     } catch (err) {
-      // The server refuses a flat with residents or visitor history — removing
-      // an occupied home, or orphaning the sessions logged against it, is not
-      // something to do on a grid click. Show its reason verbatim.
+      // Soft delete rarely fails, but surface any reason verbatim rather than
+      // swallow it.
       setError(err.message)
       setConfirmFlat(null)
     } finally {
@@ -504,7 +503,8 @@ export default function Layout() {
                 Delete flat <code>{confirmFlat.code}</code>?
               </span>
               <span style={{ fontSize: 13, color: colors.muted }}>
-                A flat with residents or visitor history can’t be deleted.
+                Its residents go with it. Nothing is lost — the flat and its history
+                stay on record and can be viewed from the flat page.
               </span>
               <button type="button" className="btn btn--sm" disabled={busy} onClick={deleteFlat}>
                 {busy ? 'Deleting…' : 'Yes, delete'}

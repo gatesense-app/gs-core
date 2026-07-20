@@ -9,10 +9,12 @@ Editing a wing (E4-S3), reconcile (E4-S4) and CSV import (E3) are later stories.
 """
 
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 
+from backend import audit
 from backend import db_models as m
 from backend.deps import CurrentUser, get_db, require_role
 from backend.routers.common import parse_uuid, resolve_society_id
@@ -22,6 +24,7 @@ from backend.schemas import (
     FlatUpdate,
     ReconcileLink,
     ReconcileReport,
+    TimelineEvent,
     UnmatchedResident,
     WingCreate,
     WingResponse,
@@ -29,18 +32,22 @@ from backend.schemas import (
 )
 from backend.tools import resolve
 
+
+def _now():
+    return datetime.now(timezone.utc)
+
 router = APIRouter(tags=["layout"])
 
 _admins = require_role("platform_admin", "society_admin")
 
 
 def _flat_counts(db, wing_ids: list) -> dict:
-    """wing_id -> number of actual flats. One query, not N."""
+    """wing_id -> number of *live* flats. One query, not N."""
     if not wing_ids:
         return {}
     rows = db.execute(
         select(m.Flat.wing_id, func.count(m.Flat.id))
-        .where(m.Flat.wing_id.in_(wing_ids))
+        .where(m.Flat.wing_id.in_(wing_ids), m.Flat.deleted_at.is_(None))
         .group_by(m.Flat.wing_id)
     ).all()
     return {wid: count for wid, count in rows}
@@ -76,6 +83,7 @@ def _flat_resp(
         linked_residents=linked_residents,
         standing_rules=f.standing_rules,
         delivery_preferences=f.delivery_preferences,
+        deleted_at=f.deleted_at,
     )
 
 
@@ -158,7 +166,8 @@ def _declared_shape_warnings(db, wing: m.Wing) -> list[str]:
     warnings = []
     above = db.execute(
         select(func.count(m.Flat.id)).where(
-            m.Flat.wing_id == wing.id, m.Flat.floor > wing.floors
+            m.Flat.wing_id == wing.id, m.Flat.floor > wing.floors,
+            m.Flat.deleted_at.is_(None),
         )
     ).scalar_one()
     if above:
@@ -168,7 +177,7 @@ def _declared_shape_warnings(db, wing: m.Wing) -> list[str]:
         )
     crowded = db.execute(
         select(m.Flat.floor)
-        .where(m.Flat.wing_id == wing.id)
+        .where(m.Flat.wing_id == wing.id, m.Flat.deleted_at.is_(None))
         .group_by(m.Flat.floor)
         .having(func.count(m.Flat.id) > wing.flats_per_floor)
     ).scalars().all()
@@ -226,7 +235,9 @@ def update_wing(
                 )
             if flat_count:
                 sample = db.execute(
-                    select(m.Flat.code).where(m.Flat.wing_id == wing.id).order_by(m.Flat.code)
+                    select(m.Flat.code)
+                    .where(m.Flat.wing_id == wing.id, m.Flat.deleted_at.is_(None))
+                    .order_by(m.Flat.code)
                 ).scalars().first()
                 warnings.append(
                     f"{flat_count} existing flat(s) keep their codes (e.g. {sample}) so "
@@ -276,10 +287,12 @@ def _normalize(code: str) -> str:
 
 def _build_report(db, society_id) -> ReconcileReport:
     flats = db.execute(
-        select(m.Flat).where(m.Flat.society_id == society_id)
+        select(m.Flat).where(
+            m.Flat.society_id == society_id, m.Flat.deleted_at.is_(None))
     ).scalars().all()
     residents = db.execute(
-        select(m.Resident).where(m.Resident.society_id == society_id)
+        select(m.Resident).where(
+            m.Resident.society_id == society_id, m.Resident.deleted_at.is_(None))
     ).scalars().all()
 
     # Normalized index, used only to *suggest*. Codes are unique per society, but
@@ -342,7 +355,10 @@ def reconcile_run(
     over comes back in `unmatched` for manual resolution.
     """
     sid = parse_uuid(resolve_society_id(user, society_id))
-    for flat in db.execute(select(m.Flat).where(m.Flat.society_id == sid)).scalars().all():
+    live_flats = db.execute(
+        select(m.Flat).where(m.Flat.society_id == sid, m.Flat.deleted_at.is_(None))
+    ).scalars().all()
+    for flat in live_flats:
         resolve.link_exact_matches(db, sid, flat)
     return _build_report(db, sid)
 
@@ -368,8 +384,10 @@ def reconcile_link(
     if resident is None:  # RLS hides other societies' rows -> looks like 404
         raise HTTPException(404, "Resident not found")
     flat = db.get(m.Flat, parse_uuid(body.flat_id))
-    if flat is None:
+    if flat is None or flat.deleted_at is not None:
         raise HTTPException(404, "Flat not found")
+    if resident.deleted_at is not None:
+        raise HTTPException(404, "Resident not found")
     if resident.society_id != flat.society_id:
         # Unreachable via RLS for a scoped role; a platform_admin bypasses it.
         raise HTTPException(400, "Resident and flat belong to different societies")
@@ -406,7 +424,8 @@ def _shape_warnings(db, wing: m.Wing, floor: int, exclude_flat_id=None) -> list[
     # Count the flat's *neighbours*, so the "+1" below is this flat joining them.
     # On a create it isn't inserted yet; on an edit it already is, so it has to
     # be excluded or it would count itself twice.
-    q = select(func.count(m.Flat.id)).where(m.Flat.wing_id == wing.id, m.Flat.floor == floor)
+    q = select(func.count(m.Flat.id)).where(
+        m.Flat.wing_id == wing.id, m.Flat.floor == floor, m.Flat.deleted_at.is_(None))
     if exclude_flat_id is not None:
         q = q.where(m.Flat.id != exclude_flat_id)
     on_floor = db.execute(q).scalar_one()
@@ -419,7 +438,7 @@ def _shape_warnings(db, wing: m.Wing, floor: int, exclude_flat_id=None) -> list[
 
 
 @router.post("/flats", status_code=201, response_model=FlatResponse)
-def create_flat(body: FlatCreate, _: CurrentUser = Depends(_admins), db=Depends(get_db)):
+def create_flat(body: FlatCreate, user: CurrentUser = Depends(_admins), db=Depends(get_db)):
     """
     Add a flat to a wing: `code = "{wing}-{flat_number}"` from the number the
     admin typed. The society comes from the wing, not the body — the wing was
@@ -431,8 +450,12 @@ def create_flat(body: FlatCreate, _: CurrentUser = Depends(_admins), db=Depends(
         raise HTTPException(422, "Flat number is required")
     code = f"{wing.name}-{flat_number}"
 
+    # Only a *live* flat blocks the code. A soft-deleted A-101 leaves the code
+    # free to be created again — a fresh flat with its own history.
     exists = db.execute(
-        select(m.Flat.id).where(m.Flat.society_id == wing.society_id, m.Flat.code == code)
+        select(m.Flat.id).where(
+            m.Flat.society_id == wing.society_id, m.Flat.code == code,
+            m.Flat.deleted_at.is_(None))
     ).first()
     if exists:
         raise HTTPException(409, f"Flat '{code}' already exists in this society")
@@ -455,6 +478,16 @@ def create_flat(body: FlatCreate, _: CurrentUser = Depends(_admins), db=Depends(
 
     # D4: introducing a layout must not orphan anyone who was already here.
     linked = resolve.link_exact_matches(db, wing.society_id, flat)
+
+    summary = f"Flat {code} added on floor {body.floor}"
+    if linked:
+        summary += f", adopting {linked} existing resident(s)"
+    audit.record(
+        db, society_id=wing.society_id, user=user, action="flat_created",
+        summary=summary, entity_type=audit.FLAT, entity_id=flat.id,
+        flat_id=flat.id, flat_code=code,
+        detail={"floor": body.floor, "linked_residents": linked},
+    )
     return _flat_resp(flat, wing.name, warnings, linked)
 
 
@@ -470,7 +503,7 @@ def list_flats(
     q = (
         select(m.Flat, m.Wing.name)
         .join(m.Wing, m.Flat.wing_id == m.Wing.id)
-        .where(m.Flat.society_id == parse_uuid(sid))
+        .where(m.Flat.society_id == parse_uuid(sid), m.Flat.deleted_at.is_(None))
         .order_by(m.Wing.name, m.Flat.floor, m.Flat.flat_number)
     )
     if wing_id:
@@ -508,6 +541,7 @@ def _recode_flat(db, flat: m.Flat, wing: m.Wing, new_number: str) -> list[str]:
             m.Flat.society_id == flat.society_id,
             m.Flat.code == new_code,
             m.Flat.id != flat.id,
+            m.Flat.deleted_at.is_(None),
         )
     ).first()
     if clash:
@@ -568,7 +602,7 @@ def _recode_flat(db, flat: m.Flat, wing: m.Wing, new_number: str) -> list[str]:
 def update_flat(
     flat_id: str,
     body: FlatUpdate,
-    _: CurrentUser = Depends(_admins),
+    user: CurrentUser = Depends(_admins),
     db=Depends(get_db),
 ):
     """
@@ -585,7 +619,7 @@ def update_flat(
     clears the override and hands the door back to its primary contact's own.
     """
     flat = db.get(m.Flat, parse_uuid(flat_id))
-    if flat is None:  # RLS hides other societies' rows -> looks like 404
+    if flat is None or flat.deleted_at is not None:  # RLS/soft-delete -> 404
         raise HTTPException(404, "Flat not found")
 
     fields = body.model_dump(exclude_unset=True)
@@ -594,26 +628,45 @@ def update_flat(
 
     wing = db.get(m.Wing, flat.wing_id)
     warnings: list[str] = []
+    events: list[tuple] = []  # (action, summary, detail) recorded after the flush
+    old_floor, old_code = flat.floor, flat.code
 
     if "floor" in fields:
         if fields["floor"] is None:
             raise HTTPException(422, "Floor is required")
-        flat.floor = fields["floor"]
+        if fields["floor"] != old_floor:
+            flat.floor = fields["floor"]
+            events.append(("flat_floor_changed",
+                           f"Floor changed from {old_floor} to {flat.floor}",
+                           {"from": old_floor, "to": flat.floor}))
 
     if "flat_number" in fields:
         new_number = (fields["flat_number"] or "").strip()
         if not new_number:
             raise HTTPException(422, "Flat number is required")
         warnings += _recode_flat(db, flat, wing, new_number)
+        if flat.code != old_code:
+            events.append(("flat_renamed",
+                           f"Renumbered from {old_code} to {flat.code}",
+                           {"from": old_code, "to": flat.code}))
 
-    for key in ("standing_rules", "delivery_preferences"):
-        if key in fields:
-            setattr(flat, key, fields[key])
+    if "standing_rules" in fields or "delivery_preferences" in fields:
+        for key in ("standing_rules", "delivery_preferences"):
+            if key in fields:
+                setattr(flat, key, fields[key])
+        events.append(("flat_rules_changed", "Door rules updated", None))
 
     try:
         db.flush()
     except Exception:
         raise HTTPException(409, "That flat code already exists in this society")
+
+    for action, summary, detail in events:
+        audit.record(
+            db, society_id=flat.society_id, user=user, action=action,
+            summary=summary, entity_type=audit.FLAT, entity_id=flat.id,
+            flat_id=flat.id, flat_code=flat.code, detail=detail,
+        )
 
     # Q2: the declared shape is a hint, so a moved flat warns rather than refuses.
     warnings += _shape_warnings(db, wing, flat.floor, exclude_flat_id=flat.id)
@@ -621,32 +674,67 @@ def update_flat(
 
 
 @router.delete("/flats/{flat_id}", status_code=204)
-def delete_flat(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)):
+def delete_flat(flat_id: str, user: CurrentUser = Depends(_admins), db=Depends(get_db)):
     """
-    Refused when the flat has residents or visitor history — silently removing
-    an occupied flat, or orphaning the history a guard logged against it, is
-    unacceptable (E4-S3).
+    Soft-delete a flat, cascading to its residents.
+
+    Nothing is truly removed: the flat and its residents keep their rows (and
+    their whole timeline) and are simply marked deleted, so a flat with residents
+    or visitor history *can* now be deleted — the old refusal existed only because
+    a hard delete lost that history. resolve.py filters deleted rows, so the gate
+    stops seeing the flat and its people at once. The code is freed for re-use.
+    """
+    flat = db.get(m.Flat, parse_uuid(flat_id))
+    if flat is None or flat.deleted_at is not None:
+        raise HTTPException(404, "Flat not found")
+
+    now = _now()
+    # Cascade to the flat's live residents — the household goes with the door.
+    residents = resolve.flat_residents(db, flat.society_id, flat.code)
+    for r in residents:
+        r.deleted_at = now
+        r.is_primary = False  # free the primary slot even though it's soft-deleted
+    flat.deleted_at = now
+    db.flush()
+
+    for r in residents:
+        audit.record(
+            db, society_id=flat.society_id, user=user, action="resident_deleted",
+            summary=f"{r.name} removed (flat {flat.code} deleted)",
+            entity_type=audit.RESIDENT, entity_id=r.id,
+            flat_id=flat.id, flat_code=flat.code,
+        )
+    audit.record(
+        db, society_id=flat.society_id, user=user, action="flat_deleted",
+        summary=f"Flat {flat.code} deleted"
+        + (f", with {len(residents)} resident(s)" if residents else ""),
+        entity_type=audit.FLAT, entity_id=flat.id,
+        flat_id=flat.id, flat_code=flat.code,
+        detail={"residents_removed": len(residents)},
+    )
+
+
+@router.get("/flats/{flat_id}/timeline", response_model=list[TimelineEvent])
+def flat_timeline(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(get_db)):
+    """
+    The history of a flat and its residents — created, renamed, moved, rules
+    changed, residents added/edited/made-primary/removed — newest first.
+
+    Reachable for a soft-deleted flat too: seeing why and when a flat went away
+    is the whole point of keeping it.
     """
     flat = db.get(m.Flat, parse_uuid(flat_id))
     if flat is None:
         raise HTTPException(404, "Flat not found")
-
-    residents = db.execute(
-        select(func.count(m.Resident.id)).where(m.Resident.flat_id == flat.id)
-    ).scalar_one()
-    if residents:
-        raise HTTPException(409, f"Flat '{flat.code}' still has {residents} resident(s)")
-
-    # History is free text (the agents still resolve by typed string until E6-S3),
-    # so this matches on the code rather than an FK.
-    history = db.execute(
-        select(func.count(m.VisitorSession.id)).where(
-            m.VisitorSession.society_id == flat.society_id,
-            m.VisitorSession.flat_number == flat.code,
+    rows = db.execute(
+        select(m.LayoutEvent)
+        .where(m.LayoutEvent.flat_id == flat.id)
+        .order_by(m.LayoutEvent.created_at.desc(), m.LayoutEvent.id.desc())
+    ).scalars().all()
+    return [
+        TimelineEvent(
+            id=str(e.id), action=e.action, summary=e.summary,
+            actor_email=e.actor_email, detail=e.detail, created_at=e.created_at,
         )
-    ).scalar_one()
-    if history:
-        raise HTTPException(409, f"Flat '{flat.code}' has visitor history and cannot be deleted")
-
-    db.delete(flat)
-    db.flush()
+        for e in rows
+    ]

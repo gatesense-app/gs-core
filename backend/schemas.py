@@ -143,6 +143,20 @@ class FlatResponse(BaseModel):
     # own rules apply — which is different from [] meaning "no rules".
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
+    # Soft delete: set once the flat is deleted. Lists never return a deleted
+    # flat, but its detail page stays reachable to view the timeline.
+    deleted_at: Optional[datetime] = None
+
+
+class TimelineEvent(BaseModel):
+    """One entry on a flat's history (audit trail)."""
+
+    id: str
+    action: str
+    summary: str
+    actor_email: Optional[str] = None
+    detail: Optional[dict[str, Any]] = None
+    created_at: Optional[datetime] = None
 
 
 class FlatUpdate(BaseModel):

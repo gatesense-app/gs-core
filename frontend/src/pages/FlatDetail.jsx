@@ -64,6 +64,16 @@ function fmt(iso) {
   return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+// A quiet dot colour per kind of event, so the timeline scans at a glance —
+// paired with the text summary, never colour alone.
+const EVENT_DOT = {
+  flat_created: '#22c55e', resident_added: '#22c55e',
+  flat_renamed: '#3b82f6', flat_floor_changed: '#3b82f6',
+  flat_rules_changed: '#3b82f6', resident_edited: '#3b82f6',
+  resident_primary_set: '#a855f7',
+  flat_deleted: '#ef4444', resident_deleted: '#ef4444',
+}
+
 export default function FlatDetail() {
   const { id } = useParams()
   const { user } = useAuth()
@@ -73,6 +83,7 @@ export default function FlatDetail() {
   const [notFound, setNotFound] = useState(false)
   const [residents, setResidents] = useState([])
   const [sessions, setSessions] = useState([])
+  const [timeline, setTimeline] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -112,6 +123,9 @@ export default function FlatDetail() {
           .filter((v) => v.flat_number === f.code)
           .sort((a, b) => new Date(b.entry_time || 0) - new Date(a.entry_time || 0)),
       )
+      // The audit trail — every change to this flat and its residents, newest
+      // first. Reachable even for a soft-deleted flat.
+      setTimeline(await apiFetch(`/flats/${id}/timeline`).catch(() => []))
     } catch (err) {
       if (err.status === 404) setNotFound(true)  // don't confirm existence
       else setError(err.message)
@@ -257,6 +271,19 @@ export default function FlatDetail() {
   return (
     <div style={s.page}>
       <Link to="/layout" style={s.back}>← Back to Layout</Link>
+
+      {flat.deleted_at && (
+        <div style={{ ...s.card, padding: 14, borderColor: '#ef4444',
+                      background: 'rgba(239,68,68,0.08)' }}>
+          <span style={{ fontSize: 14, color: 'var(--c-text)', fontWeight: 600 }}>
+            This flat was deleted
+          </span>
+          <span style={{ fontSize: 13, color: colors.sub }}> · {fmt(flat.deleted_at)}. </span>
+          <span style={{ fontSize: 13, color: colors.sub }}>
+            Its residents and history are kept below for the record.
+          </span>
+        </div>
+      )}
 
       {/* Flat header */}
       <div style={s.card}>
@@ -437,6 +464,33 @@ export default function FlatDetail() {
               <span style={s.statusBadge(v.status)}>{v.status}</span>
             </div>
           ))
+        )}
+      </div>
+
+      {/* History — the audit trail of edits and deletes on this flat */}
+      <div style={s.card}>
+        <h2 className="section-title">History</h2>
+        {timeline.length === 0 ? (
+          <div style={s.none}>No changes recorded yet.</div>
+        ) : (
+          <div>
+            {timeline.map((e) => (
+              <div key={e.id} style={{ display: 'flex', gap: 12, padding: '10px 0',
+                                       borderBottom: '1px solid var(--c-row-border)' }}>
+                <span aria-hidden="true" style={{
+                  flex: '0 0 auto', width: 8, height: 8, borderRadius: 99, marginTop: 6,
+                  background: EVENT_DOT[e.action] || 'var(--c-muted)',
+                }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, color: 'var(--c-text)' }}>{e.summary}</div>
+                  <div style={s.resPhone}>
+                    {fmt(e.created_at)}
+                    {e.actor_email ? ` · ${e.actor_email}` : ' · system'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
