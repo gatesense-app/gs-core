@@ -70,7 +70,7 @@ const EVENT_DOT = {
   flat_created: '#22c55e', resident_added: '#22c55e',
   flat_renamed: '#3b82f6', flat_floor_changed: '#3b82f6',
   flat_rules_changed: '#3b82f6', resident_edited: '#3b82f6',
-  resident_primary_set: '#a855f7',
+  resident_primary_set: '#a855f7', flat_linked: '#a855f7',
   flat_deleted: '#ef4444', resident_deleted: '#ef4444',
 }
 

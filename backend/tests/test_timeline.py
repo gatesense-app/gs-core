@@ -149,6 +149,71 @@ def test_promoting_a_new_contact_after_a_delete_is_recorded(society):
         "removing the primary should record who took over"
 
 
+# --- Linking a re-created flat to its deleted predecessor -------------------
+
+def test_prior_deleted_endpoint_finds_the_deleted_flat(society):
+    flat = _flat(society, "101")
+    client.post("/residents", headers=_hdr(society),
+                json={"flat_number": "A-101", "name": "Priya Sharma"})
+    client.delete(f"/flats/{flat['id']}", headers=_hdr(society))
+
+    r = client.get("/flats/prior-deleted", headers=_hdr(society),
+                   params={"wing_id": _wing_id(society), "flat_number": "101"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["exists"] is True
+    assert body["code"] == "A-101"
+    assert body["resident_count"] == 1
+    assert body["deleted_at"] is not None
+
+
+def test_prior_deleted_endpoint_is_silent_when_nothing_was_deleted(society):
+    r = client.get("/flats/prior-deleted", headers=_hdr(society),
+                   params={"wing_id": _wing_id(society), "flat_number": "999"})
+    assert r.status_code == 200
+    assert r.json()["exists"] is False
+
+
+def test_linking_surfaces_the_deleted_flats_history(society):
+    first = _flat(society, "101")
+    client.post("/residents", headers=_hdr(society),
+                json={"flat_number": "A-101", "name": "Priya Sharma"})
+    client.delete(f"/flats/{first['id']}", headers=_hdr(society))
+
+    # Re-create the same code, choosing to link the old history.
+    r = client.post("/flats", headers=_hdr(society), json={
+        "wing_id": _wing_id(society), "flat_number": "101", "floor": 1,
+        "link_prior": True,
+    })
+    assert r.status_code == 201, r.text
+    second = r.json()
+    assert second["id"] != first["id"], "linking creates a NEW flat"
+
+    tl = _timeline(society, second["id"])
+    actions = _actions(tl)
+    # The link itself is recorded...
+    assert "flat_linked" in actions
+    # ...and the deleted flat's history (its create + its resident) is now visible.
+    assert actions.count("flat_created") == 2
+    assert "flat_deleted" in actions
+    assert any("Priya Sharma" in e["summary"] for e in tl)
+
+
+def test_not_linking_keeps_the_new_flat_fresh(society):
+    first = _flat(society, "101")
+    client.post("/residents", headers=_hdr(society),
+                json={"flat_number": "A-101", "name": "Priya Sharma"})
+    client.delete(f"/flats/{first['id']}", headers=_hdr(society))
+
+    # Default: create without linking.
+    r = client.post("/flats", headers=_hdr(society), json={
+        "wing_id": _wing_id(society), "flat_number": "101", "floor": 1,
+    })
+    second = r.json()
+    actions = _actions(_timeline(society, second["id"]))
+    assert actions == ["flat_created"], "a fresh flat carries none of the old history"
+
+
 # --- Nothing leaks to the gate ---------------------------------------------
 
 def test_a_soft_deleted_flats_detail_is_reachable_but_shows_deleted(society):

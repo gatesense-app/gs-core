@@ -22,6 +22,7 @@ from backend.schemas import (
     FlatCreate,
     FlatResponse,
     FlatUpdate,
+    PriorFlat,
     ReconcileLink,
     ReconcileReport,
     TimelineEvent,
@@ -437,6 +438,24 @@ def _shape_warnings(db, wing: m.Wing, floor: int, exclude_flat_id=None) -> list[
     return warnings
 
 
+def _prior_deleted_flat(db, society_id, code: str) -> m.Flat | None:
+    """
+    The most recently soft-deleted flat that carried this code, if any.
+
+    Only deleted rows are considered — a live one would have blocked the create.
+    Newest wins: if A-101 came and went twice, the link points at the last life.
+    """
+    return db.execute(
+        select(m.Flat)
+        .where(
+            m.Flat.society_id == society_id,
+            m.Flat.code == code,
+            m.Flat.deleted_at.is_not(None),
+        )
+        .order_by(m.Flat.deleted_at.desc())
+    ).scalars().first()
+
+
 @router.post("/flats", status_code=201, response_model=FlatResponse)
 def create_flat(body: FlatCreate, user: CurrentUser = Depends(_admins), db=Depends(get_db)):
     """
@@ -488,6 +507,25 @@ def create_flat(body: FlatCreate, user: CurrentUser = Depends(_admins), db=Depen
         flat_id=flat.id, flat_code=code,
         detail={"floor": body.floor, "linked_residents": linked},
     )
+
+    # Optionally adopt the history of a prior flat that carried this code and was
+    # deleted. The new flat stays new — nothing of the old flat's is un-deleted;
+    # only its timeline (and its former residents' events) becomes reachable here.
+    if body.link_prior:
+        prior = _prior_deleted_flat(db, wing.society_id, code)
+        if prior is not None:
+            flat.prior_flat_id = prior.id
+            db.flush()
+            when = prior.deleted_at.date().isoformat() if prior.deleted_at else "earlier"
+            audit.record(
+                db, society_id=wing.society_id, user=user, action="flat_linked",
+                summary=f"Linked to a previously deleted {code} (deleted {when}); "
+                        f"its history now appears below",
+                entity_type=audit.FLAT, entity_id=flat.id,
+                flat_id=flat.id, flat_code=code,
+                detail={"prior_flat_id": str(prior.id), "prior_deleted_at": when},
+            )
+
     return _flat_resp(flat, wing.name, warnings, linked)
 
 
@@ -509,6 +547,47 @@ def list_flats(
     if wing_id:
         q = q.where(m.Flat.wing_id == parse_uuid(wing_id))
     return [_flat_resp(f, wing_name) for f, wing_name in db.execute(q).all()]
+
+
+@router.get("/flats/prior-deleted", response_model=PriorFlat)
+def prior_deleted_flat(
+    wing_id: str,
+    flat_number: str,
+    _: CurrentUser = Depends(_admins),
+    db=Depends(get_db),
+):
+    """
+    Before adding a flat, ask whether a deleted one already carried this code.
+
+    Lets the UI offer to link the new flat to that history instead of silently
+    starting over. Read-only. Declared before `/flats/{flat_id}` so the literal
+    path wins over the id parameter.
+    """
+    wing = _get_wing(db, wing_id)
+    number = flat_number.strip()
+    if not number:
+        return PriorFlat(exists=False)
+    code = f"{wing.name}-{number}"
+    prior = _prior_deleted_flat(db, wing.society_id, code)
+    if prior is None:
+        return PriorFlat(exists=False)
+    # Its former residents, deleted with it — a direct count, not a resolve() call,
+    # so this read intentionally sees the soft-deleted rows the gate never does.
+    # Residents are matched by code (not flat_id, which free-text residents lack).
+    resident_count = db.execute(
+        select(func.count(m.Resident.id)).where(
+            m.Resident.society_id == prior.society_id,
+            m.Resident.flat_number == code,
+            m.Resident.deleted_at.is_not(None),
+        )
+    ).scalar_one()
+    return PriorFlat(
+        exists=True,
+        flat_id=str(prior.id),
+        code=code,
+        deleted_at=prior.deleted_at,
+        resident_count=resident_count,
+    )
 
 
 @router.get("/flats/{flat_id}", response_model=FlatResponse)
@@ -722,13 +801,29 @@ def flat_timeline(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(ge
 
     Reachable for a soft-deleted flat too: seeing why and when a flat went away
     is the whole point of keeping it.
+
+    If this flat was linked to a prior deleted flat of the same code (the admin
+    chose to when re-creating it), the chain is walked so the old flat's history —
+    and its former, now-deleted residents' events — appears here too. The rows
+    stay the deleted flat's; only the timeline reunites them.
     """
     flat = db.get(m.Flat, parse_uuid(flat_id))
     if flat is None:
         raise HTTPException(404, "Flat not found")
+
+    # Collect this flat and every prior flat it links back to. Bounded walk with a
+    # seen-set so a stray cycle (or a flat linked to itself) can't loop forever.
+    flat_ids = []
+    seen = set()
+    cursor = flat
+    while cursor is not None and cursor.id not in seen:
+        seen.add(cursor.id)
+        flat_ids.append(cursor.id)
+        cursor = db.get(m.Flat, cursor.prior_flat_id) if cursor.prior_flat_id else None
+
     rows = db.execute(
         select(m.LayoutEvent)
-        .where(m.LayoutEvent.flat_id == flat.id)
+        .where(m.LayoutEvent.flat_id.in_(flat_ids))
         .order_by(m.LayoutEvent.created_at.desc(), m.LayoutEvent.id.desc())
     ).scalars().all()
     return [

@@ -125,6 +125,21 @@ class FlatCreate(BaseModel):
     wing_id: str
     flat_number: str = Field(min_length=1, max_length=32)
     floor: int
+    # When a flat with this code was soft-deleted before, the admin may choose to
+    # link the new flat to it so the old flat's history surfaces on the new
+    # timeline. Defaults off, so an ordinary create is unchanged and a CSV import
+    # (which builds Flat rows directly) never trips this.
+    link_prior: bool = False
+
+
+class PriorFlat(BaseModel):
+    """A soft-deleted flat that shares a to-be-created flat's code."""
+
+    exists: bool = False
+    flat_id: Optional[str] = None
+    code: Optional[str] = None
+    deleted_at: Optional[datetime] = None
+    resident_count: int = 0
 
 
 class FlatResponse(BaseModel):

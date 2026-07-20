@@ -110,6 +110,13 @@ class Flat(Base):
     # deleted_at IS NULL; resolve.py does too, so the gate never reaches a
     # deleted flat. See backend/audit.py for the trail.
     deleted_at = Column(DateTime(timezone=True))
+    # When a flat is re-created with the same code as a soft-deleted one, the admin
+    # may choose to link the new flat to that prior deleted flat, so its history
+    # (and its former, now-deleted residents) surfaces on the new flat's timeline.
+    # Self-referential and nullable; a fresh (unlinked) flat leaves it NULL. The
+    # link is a memory-only pointer — the deleted rows stay deleted (the gate never
+    # sees them); only the timeline walks the chain. See routers/layout.py.
+    prior_flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="SET NULL"))
     # E6-S3: rules belong to the door, not to whoever happens to live behind it —
     # two residents must not hold contradictory rules for one flat.
     #

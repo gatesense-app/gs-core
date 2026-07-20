@@ -110,6 +110,7 @@ export default function Layout() {
   const [notice, setNotice] = useState([])   // Q2 warnings / adoption feedback
   const [confirmWing, setConfirmWing] = useState(false)
   const [confirmFlat, setConfirmFlat] = useState(null)
+  const [confirmLink, setConfirmLink] = useState(null)  // prior deleted flat found on add
 
   // society_admin's society comes from the JWT; platform_admin must name one.
   const sq = isPlatform ? societyId : ''
@@ -238,24 +239,47 @@ export default function Layout() {
 
   async function addFlat(e) {
     e.preventDefault()
+    const flat_number = flatForm.flat_number.trim()
     setBusy(true)
     setError('')
     setNotice([])
     try {
+      // A flat with this code may have been deleted before. If so, ask whether to
+      // adopt its history rather than silently starting a fresh, blank flat.
+      const prior = await apiFetch(
+        `/flats/prior-deleted?wing_id=${wingId}&flat_number=${encodeURIComponent(flat_number)}`,
+      )
+      if (prior.exists) {
+        setConfirmLink({ prior, floor: Number(flatForm.floor), flat_number })
+        setBusy(false)
+        return
+      }
+      await postFlat(flat_number, Number(flatForm.floor), false)
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  // The actual create, shared by the plain path and the "link its history" choice.
+  async function postFlat(flat_number, floor, link_prior) {
+    setBusy(true)
+    setError('')
+    try {
       const created = await apiFetch('/flats', {
         method: 'POST',
-        body: {
-          wing_id: wingId,
-          flat_number: flatForm.flat_number.trim(),
-          floor: Number(flatForm.floor),
-        },
+        body: { wing_id: wingId, flat_number, floor, link_prior },
       })
       setFlatForm({ ...emptyFlat, floor: flatForm.floor })  // keep the floor for the next one
+      setConfirmLink(null)
       // Q2: the declared shape is only a hint, so the server saves and warns.
       // Surfacing that is the whole point — a silent warning is no warning.
       const msgs = [...(created.warnings || [])]
       if (created.linked_residents > 0) {
         msgs.push(`Linked ${created.linked_residents} existing resident(s) already on ${created.code}.`)
+      }
+      if (link_prior) {
+        msgs.push(`The previously deleted ${created.code}'s history now appears on this flat's page.`)
       }
       setNotice(msgs)
       await loadFlats(wingId)
@@ -511,6 +535,33 @@ export default function Layout() {
               </button>
               <button type="button" className="btn btn--ghost btn--sm"
                       onClick={() => setConfirmFlat(null)}>Cancel</button>
+            </div>
+          )}
+
+          {confirmLink && (
+            <div style={{ ...ui.card, padding: 14, display: 'flex', gap: 10,
+                          alignItems: 'center', flexWrap: 'wrap',
+                          borderColor: 'var(--c-accent-border)' }}>
+              <span style={{ fontSize: 14, color: colors.text }}>
+                A flat <code>{confirmLink.prior.code}</code> was deleted here before
+                {confirmLink.prior.resident_count > 0 &&
+                  ` (with ${confirmLink.prior.resident_count} resident(s))`}.
+              </span>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                Link its history to this new flat, so its past residents and events
+                show on the flat's timeline? The new flat is still new — nothing is
+                un-deleted.
+              </span>
+              <button type="button" className="btn btn--sm" disabled={busy}
+                      onClick={() => postFlat(confirmLink.flat_number, confirmLink.floor, true)}>
+                {busy ? 'Creating…' : 'Link history & create'}
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy}
+                      onClick={() => postFlat(confirmLink.flat_number, confirmLink.floor, false)}>
+                Create without history
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy}
+                      onClick={() => setConfirmLink(null)}>Cancel</button>
             </div>
           )}
 
