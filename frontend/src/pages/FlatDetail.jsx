@@ -40,6 +40,24 @@ const s = {
     background: 'var(--c-accent-bg)', color: 'var(--c-accent-soft)',
     border: '1px solid var(--c-accent-border)', marginLeft: 8,
   },
+  roleBadge: (role) => ({
+    display: 'inline-block', padding: '2px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+    marginLeft: 8,
+    background: role === 'tenant' ? '#f59e0b22' : '#3b82f622',
+    color: role === 'tenant' ? '#b45309' : '#1d4ed8',
+    border: `1px solid ${role === 'tenant' ? '#f59e0b55' : '#3b82f655'}`,
+  }),
+  expiredTag: {
+    display: 'inline-block', marginLeft: 8, padding: '1px 8px', borderRadius: 99,
+    fontSize: 11, fontWeight: 600, background: '#ef444422', color: '#b91c1c',
+    border: '1px solid #ef444455',
+  },
+  toggle: (active) => ({
+    padding: '4px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    border: '1px solid var(--c-border)',
+    background: active ? 'var(--c-accent-bg)' : 'transparent',
+    color: active ? 'var(--c-accent-soft)' : 'var(--c-muted)',
+  }),
   statusBadge: (status) => ({
     display: 'inline-block', padding: '2px 9px', borderRadius: 99, fontSize: 12, fontWeight: 500,
     background: (STATUS_COLOR[status] || '#64748b') + '22', color: STATUS_COLOR[status] || '#64748b',
@@ -64,12 +82,21 @@ function fmt(iso) {
   return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function tenancyDates(t) {
+  if (t.start_date && t.end_date) return `${t.start_date} → ${t.end_date}`
+  if (t.start_date) return `From ${t.start_date}`
+  if (t.end_date) return `Until ${t.end_date}`
+  return 'No dates set'
+}
+
 // A quiet dot colour per kind of event, so the timeline scans at a glance —
 // paired with the text summary, never colour alone.
 const EVENT_DOT = {
   flat_created: '#22c55e', resident_added: '#22c55e',
   flat_renamed: '#3b82f6', flat_floor_changed: '#3b82f6',
   flat_rules_changed: '#3b82f6', resident_edited: '#3b82f6',
+  flat_occupancy_changed: '#f59e0b', resident_role_changed: '#f59e0b',
+  tenancy_started: '#0ea5e9', tenancy_renewed: '#0ea5e9', tenancy_ended: '#ef4444',
   resident_primary_set: '#a855f7', flat_linked: '#a855f7',
   flat_deleted: '#ef4444', resident_deleted: '#ef4444',
 }
@@ -82,10 +109,21 @@ export default function FlatDetail() {
   const [flat, setFlat] = useState(null)
   const [notFound, setNotFound] = useState(false)
   const [residents, setResidents] = useState([])
+  const [tenancies, setTenancies] = useState([])
   const [sessions, setSessions] = useState([])
   const [timeline, setTimeline] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // Tenant section forms
+  const [tStart, setTStart] = useState('')
+  const [tEnd, setTEnd] = useState('')
+  const [tenantName, setTenantName] = useState('')
+  const [tenantPhone, setTenantPhone] = useState('')
+  const [renewing, setRenewing] = useState(false)
+  const [renewStart, setRenewStart] = useState('')
+  const [renewEnd, setRenewEnd] = useState('')
+  const [confirmEnd, setConfirmEnd] = useState(false)
 
   // Add-resident form
   const [addName, setAddName] = useState('')
@@ -123,6 +161,8 @@ export default function FlatDetail() {
           .filter((v) => v.flat_number === f.code)
           .sort((a, b) => new Date(b.entry_time || 0) - new Date(a.entry_time || 0)),
       )
+      // Tenancy agreements (active + past) for a tenant-occupied flat.
+      setTenancies(await apiFetch(`/flats/${id}/tenancies`).catch(() => []))
       // The audit trail — every change to this flat and its residents, newest
       // first. Reachable even for a soft-deleted flat.
       setTimeline(await apiFetch(`/flats/${id}/timeline`).catch(() => []))
@@ -164,6 +204,76 @@ export default function FlatDetail() {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function setOccupancy(value) {
+    if (!flat || flat.occupancy === value) return
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      await apiFetch(`/flats/${id}`, { method: 'PATCH', body: { occupancy: value } })
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Wraps a tenancy mutation with busy/error handling and a reload.
+  async function tenancyAction(fn) {
+    setBusy(true)
+    setError('')
+    try {
+      await fn()
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function startTenancy(e) {
+    e.preventDefault()
+    tenancyAction(async () => {
+      await apiFetch(`/flats/${id}/tenancies`, {
+        method: 'POST',
+        body: { start_date: tStart || null, end_date: tEnd || null },
+      })
+      setTStart(''); setTEnd('')
+    })
+  }
+
+  function addTenant(e, tenancyId) {
+    e.preventDefault()
+    if (!tenantName.trim()) return
+    tenancyAction(async () => {
+      await apiFetch(`/tenancies/${tenancyId}/tenants`, {
+        method: 'POST',
+        body: { name: tenantName.trim(), phone: tenantPhone.trim() || null },
+      })
+      setTenantName(''); setTenantPhone('')
+    })
+  }
+
+  function renewTenancy(e, tenancyId) {
+    e.preventDefault()
+    tenancyAction(async () => {
+      await apiFetch(`/tenancies/${tenancyId}/renew`, {
+        method: 'POST',
+        body: { start_date: renewStart || null, end_date: renewEnd || null },
+      })
+      setRenewing(false); setRenewStart(''); setRenewEnd('')
+    })
+  }
+
+  function endTenancy(tenancyId) {
+    tenancyAction(async () => {
+      await apiFetch(`/tenancies/${tenancyId}/end`, { method: 'POST' })
+      setConfirmEnd(false)
+    })
   }
 
   async function addResident(e) {
@@ -256,6 +366,11 @@ export default function FlatDetail() {
   if (!flat) return <div style={{ padding: 40, color: 'var(--c-muted)' }}>Loading…</div>
 
   const primary = residents.find((r) => r.is_primary) || null
+  // The residents section shows the flat's owners/household; tenants live in the
+  // Tenant section, managed through the tenancy agreement.
+  const owners = residents.filter((r) => r.role !== 'tenant')
+  const activeTenancy = tenancies.find((t) => t.status !== 'ended') || null
+  const pastTenancies = tenancies.filter((t) => t.status === 'ended')
 
   // The door's *effective* rules — what the gate actually reads. The flat's own
   // win when set (non-null); otherwise they fall back, field-independently, to
@@ -301,6 +416,24 @@ export default function FlatDetail() {
             <div style={s.key}>Floor</div>
             <div style={s.val}>{flat.floor}</div>
           </div>
+          <div style={s.kv}>
+            <div style={s.key}>Occupancy</div>
+            <div style={{ display: 'inline-flex', borderRadius: 8, overflow: 'hidden', marginTop: 2 }}>
+              <button type="button" style={{ ...s.toggle(flat.occupancy === 'owner'), borderRadius: 0 }}
+                      disabled={busy || !!flat.deleted_at} onClick={() => setOccupancy('owner')}>
+                Owner
+              </button>
+              <button type="button" style={{ ...s.toggle(flat.occupancy === 'tenant'), borderRadius: 0, borderLeft: 'none' }}
+                      disabled={busy || !!flat.deleted_at} onClick={() => setOccupancy('tenant')}>
+                Tenant
+              </button>
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--c-muted)', marginBottom: 14 }}>
+          {flat.occupancy === 'tenant'
+            ? 'Occupied by a tenant — the gate contacts a tenant of this flat.'
+            : 'Owner-occupied — the gate contacts the owner.'}
         </div>
 
         {!editFlat ? (
@@ -344,15 +477,15 @@ export default function FlatDetail() {
         )}
       </div>
 
-      {/* Residents */}
+      {/* Residents (owners / household) */}
       <div style={s.card}>
         <h2 className="section-title">Residents</h2>
-        {residents.length === 0 ? (
+        {owners.length === 0 ? (
           <div style={{ ...s.none, marginBottom: 4 }}>
-            This flat is vacant — no residents yet. Add the first one below.
+            No residents yet. Add the flat's owner/household below.
           </div>
         ) : (
-          residents.map((r) => (
+          owners.map((r) => (
             <div key={r.id} style={s.resRow}>
               {editId === r.id ? (
                 <form onSubmit={saveEdit} style={{ ...s.editForm, marginTop: 0, flex: 1 }}>
@@ -372,6 +505,7 @@ export default function FlatDetail() {
                   <div>
                     <div style={s.resName}>
                       {r.name}
+                      <span style={s.roleBadge('owner')}>Owner</span>
                       {r.is_primary && <span style={s.primaryBadge}>Primary contact</span>}
                     </div>
                     <div style={s.resPhone}>{r.phone || 'No phone'}</div>
@@ -417,6 +551,144 @@ export default function FlatDetail() {
         </form>
         {error && <div style={ui.error}>{error}</div>}
       </div>
+
+      {/* Tenants (only when tenant-occupied) */}
+      {flat.occupancy === 'tenant' && !flat.deleted_at && (
+        <div style={s.card}>
+          <h2 className="section-title">Tenants</h2>
+          {!activeTenancy ? (
+            <>
+              <div style={{ ...s.none, marginBottom: 10 }}>
+                This flat is tenant-occupied. Start a tenancy to add tenants — the
+                primary tenant becomes the contact the gate reaches.
+              </div>
+              <form onSubmit={startTenancy} style={s.editForm}>
+                <div style={{ width: 160 }}>
+                  <label style={ui.label}>Start date (optional)</label>
+                  <input className="input" type="date" value={tStart} onChange={(e) => setTStart(e.target.value)} />
+                </div>
+                <div style={{ width: 160 }}>
+                  <label style={ui.label}>End date (optional)</label>
+                  <input className="input" type="date" value={tEnd} onChange={(e) => setTEnd(e.target.value)} />
+                </div>
+                <button className="btn btn--primary btn--sm" disabled={busy}>
+                  {busy ? 'Starting…' : 'Start tenancy'}
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: colors.sub, marginBottom: 4 }}>
+                {tenancyDates(activeTenancy)}
+                {activeTenancy.status === 'expired' && (
+                  <span style={s.expiredTag}>past end date</span>
+                )}
+              </div>
+
+              {activeTenancy.tenants.length === 0 ? (
+                <div style={{ ...s.none, marginBottom: 4 }}>
+                  No tenants yet — add the first one below (they become the contact).
+                </div>
+              ) : (
+                activeTenancy.tenants.map((r) => (
+                  <div key={r.id} style={s.resRow}>
+                    <div>
+                      <div style={s.resName}>
+                        {r.name}
+                        <span style={s.roleBadge('tenant')}>Tenant</span>
+                        {r.is_primary && <span style={s.primaryBadge}>Primary contact</span>}
+                      </div>
+                      <div style={s.resPhone}>{r.phone || 'No phone'}</div>
+                    </div>
+                    <div style={s.actions}>
+                      {!r.is_primary && (
+                        <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => makePrimary(r)}>
+                          Make primary
+                        </button>
+                      )}
+                      {confirmId === r.id ? (
+                        <>
+                          <span style={{ fontSize: 13, color: colors.error }}>Remove {r.name}?</span>
+                          <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => removeResident(r)}>
+                            Confirm remove
+                          </button>
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmId(null)}>Cancel</button>
+                        </>
+                      ) : (
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmId(r.id)}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* Add tenant */}
+              <form onSubmit={(e) => addTenant(e, activeTenancy.id)} style={s.editForm}>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <label style={ui.label}>Add tenant</label>
+                  <input className="input" value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder="Name" required />
+                </div>
+                <div style={{ width: 160 }}>
+                  <label style={ui.label}>Phone</label>
+                  <input className="input" value={tenantPhone} onChange={(e) => setTenantPhone(e.target.value)} placeholder="+91…" />
+                </div>
+                <button className="btn btn--primary btn--sm" disabled={busy}>{busy ? 'Adding…' : 'Add tenant'}</button>
+              </form>
+
+              {/* Renew / End */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                {renewing ? (
+                  <form onSubmit={(e) => renewTenancy(e, activeTenancy.id)} style={{ ...s.editForm, marginTop: 0 }}>
+                    <div style={{ width: 160 }}>
+                      <label style={ui.label}>New start (optional)</label>
+                      <input className="input" type="date" value={renewStart} onChange={(e) => setRenewStart(e.target.value)} />
+                    </div>
+                    <div style={{ width: 160 }}>
+                      <label style={ui.label}>New end (optional)</label>
+                      <input className="input" type="date" value={renewEnd} onChange={(e) => setRenewEnd(e.target.value)} />
+                    </div>
+                    <button className="btn btn--primary btn--sm" disabled={busy}>{busy ? 'Renewing…' : 'Confirm renewal'}</button>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setRenewing(false)}>Cancel</button>
+                  </form>
+                ) : confirmEnd ? (
+                  <>
+                    <span style={{ fontSize: 13, color: colors.text }}>
+                      End this tenancy? Its tenants are removed and the flat reverts to owner-occupied.
+                    </span>
+                    <button type="button" className="btn btn--sm" disabled={busy} onClick={() => endTenancy(activeTenancy.id)}>
+                      {busy ? 'Ending…' : 'Yes, end tenancy'}
+                    </button>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmEnd(false)}>Cancel</button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setRenewing(true)}>
+                      Renew (clone with new dates)
+                    </button>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmEnd(true)}>
+                      End tenancy
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
+          {pastTenancies.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ ...s.key, marginBottom: 6 }}>Previous tenancies</div>
+              {pastTenancies.map((t) => (
+                <div key={t.id} style={{ fontSize: 13, color: colors.sub, padding: '4px 0' }}>
+                  {tenancyDates(t)} — {t.tenants.map((x) => x.name).join(', ') || 'no tenants'}
+                  {' '}(ended {fmt(t.ended_at)})
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* The door's effective rules — what the gate actually enforces */}
       <div style={s.card}>

@@ -38,6 +38,9 @@ const cellLink = {
 }
 const flatState = {
   occupied: { background: 'var(--c-accent-bg)', borderColor: 'var(--c-accent-border)', color: 'var(--c-ok)' },
+  // Tenant-occupied flats read differently at a glance (amber). The colour is
+  // backed by the cell's title text (see below), so it isn't carried by hue alone.
+  tenant: { background: '#f59e0b1f', borderColor: '#f59e0b66', color: 'var(--c-ok)' },
   vacant: { background: 'transparent', color: 'var(--c-muted)' },
 }
 // Names are longer than "Occupied" and vary wildly; clip rather than let one
@@ -54,13 +57,14 @@ function Flat({ flat, contact, occupied, onDelete }) {
   // labelled Vacant, which would be a lie about an occupied home.
   const label = contact || (occupied ? 'Occupied' : 'Vacant')
   const filled = Boolean(contact || occupied)
+  const isTenant = filled && flat.occupancy === 'tenant'
+  const state = !filled ? flatState.vacant : isTenant ? flatState.tenant : flatState.occupied
+  const title = contact
+    ? `Flat ${flat.code} — primary contact ${contact}${isTenant ? ' (tenant-occupied)' : ''}`
+    : `Flat ${flat.code} — ${label}`
   return (
-    <div style={{ ...flatCell, ...(filled ? flatState.occupied : flatState.vacant) }}>
-      <Link
-        to={`/flat/${flat.id}`}
-        style={cellLink}
-        title={contact ? `Flat ${flat.code} — primary contact ${contact}` : `Flat ${flat.code} — ${label}`}
-      >
+    <div style={{ ...flatCell, ...state }}>
+      <Link to={`/flat/${flat.id}`} style={cellLink} title={title}>
         <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)', paddingRight: 14 }}>{flat.code}</span>
         {/* State is never colour-alone: a shape marker + a text label carry it too. */}
         <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, minWidth: 0 }}>

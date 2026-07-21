@@ -167,6 +167,33 @@ def ensure_primary(db, society_id, flat_number: str):
     return residents[0]
 
 
+def resync_primary(db, society_id, flat_number: str):
+    """
+    Re-elect the flat's primary contact from the role its occupancy calls for.
+
+    A tenant-occupied flat should reach a *tenant*; an owner-occupied one, the
+    *owner*. So the gate's contact (is_primary) is drawn from that role's pool,
+    falling back to the whole household when the pool is empty — a tenant-occupied
+    flat with no tenant yet still reaches its owner rather than nobody.
+
+    Idempotent: if the sitting primary already belongs to the right pool it stays,
+    so this never reshuffles a contact somebody deliberately chose within the pool.
+    Callers run it after anything that could change the answer — occupancy toggled,
+    a resident added, removed, or re-roled. Reads is_primary; the gate is untouched.
+    """
+    residents = flat_residents(db, society_id, flat_number)
+    if not residents:
+        return None
+    flat = flat_for(db, society_id, flat_number)
+    prefer = flat.occupancy if flat is not None else "owner"
+    pool = [r for r in residents if r.role == prefer] or residents
+    current = next((r for r in residents if r.is_primary), None)
+    chosen = current if current is not None and current in pool else pool[0]
+    if not chosen.is_primary:
+        claim_primary(db, chosen)
+    return chosen
+
+
 def claim_primary(db, resident) -> None:
     """
     Make this resident their flat's primary contact, demoting the incumbent.

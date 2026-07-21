@@ -23,6 +23,8 @@ def _to_resp(r: m.Resident) -> ResidentResponse:
         name=r.name,
         phone=r.phone,
         is_primary=r.is_primary,
+        role=r.role,
+        tenancy_id=str(r.tenancy_id) if r.tenancy_id else None,
         standing_rules=r.standing_rules or [],
         delivery_preferences=r.delivery_preferences or {},
     )
@@ -59,19 +61,24 @@ def list_residents(_: CurrentUser = Depends(_admins), db=Depends(get_db)):
 @router.post("", status_code=201, response_model=ResidentResponse)
 def create_resident(body: ResidentCreate, user: CurrentUser = Depends(_admins), db=Depends(get_db)):
     society_id = resolve_society_id(user, body.society_id)
+    # Residents added here are the flat's owners/household; tenants come only
+    # through a tenancy (routers/tenancies.py), which sets role='tenant'.
+    role = body.role or "owner"
     resident = m.Resident(
         society_id=society_id,
         flat_number=body.flat_number,
         name=body.name,
         phone=body.phone,
+        role=role,
         standing_rules=body.standing_rules,
         delivery_preferences=body.delivery_preferences,
     )
     db.add(resident)
     db.flush()
-    # Q3: the first resident added for a flat is its contact. A later one joins
-    # the household without stealing the slot.
-    resolve.ensure_primary(db, society_id, resident.flat_number)
+    # Q3: a flat's contact is drawn from the role its occupancy calls for (a
+    # tenant-occupied flat reaches a tenant). resync keeps that invariant; for the
+    # common owner-occupied case it lands on the first resident, as before.
+    resolve.resync_primary(db, society_id, resident.flat_number)
     audit.record(
         db, society_id=society_id, user=user, action="resident_added",
         summary=f"{resident.name} added to {resident.flat_number}",
@@ -103,6 +110,7 @@ def update_resident(
 
     fields = body.model_dump(exclude_unset=True)
     want_primary = fields.pop("is_primary", None)
+    want_role = fields.pop("role", None)
     if want_primary is False:
         # A flat always needs a contact, so "stop being primary" is not an
         # instruction we can honour on its own — promote someone else instead.
@@ -123,12 +131,25 @@ def update_resident(
         setattr(resident, key, value)
     db.flush()
 
+    # Re-label owner/tenant. Recorded on its own, then the contact is re-elected
+    # from the occupancy's role pool — re-roling the sitting contact can change
+    # who the gate should reach.
+    old_role = resident.role
+    role_changed = want_role is not None and want_role != old_role
+    primary_before = resolve.primary_resident(db, resident.society_id, resident.flat_number)
+    primary_before_id = primary_before.id if primary_before is not None else None
+    if role_changed:
+        resident.role = want_role
+        db.flush()
+
     if moving:
         # Neither door is left uncontactable.
         resolve.ensure_primary(db, resident.society_id, old_flat_number)
         resolve.ensure_primary(db, resident.society_id, resident.flat_number)
     if want_primary:
         resolve.claim_primary(db, resident)
+    elif role_changed:
+        resolve.resync_primary(db, resident.society_id, resident.flat_number)
 
     # One event for the field edit, one for a primary hand-over — they're
     # different facts a reader of the timeline cares about separately.
@@ -149,6 +170,17 @@ def update_resident(
             flat_code=resident.flat_number,
             detail={"before": before, "after": {**before, **changed}},
         )
+    if role_changed:
+        audit.record(
+            db, society_id=resident.society_id, user=user, action="resident_role_changed",
+            summary=f"{resident.name} is now the {resident.role} (was {old_role})",
+            entity_type=audit.RESIDENT, entity_id=resident.id,
+            flat_id=_flat_id_for(db, resident.society_id, resident.flat_number),
+            flat_code=resident.flat_number,
+            detail={"from": old_role, "to": resident.role},
+        )
+        _record_primary_if_changed(db, user, resident.society_id,
+                                   resident.flat_number, primary_before_id)
     if want_primary:
         audit.record(
             db, society_id=resident.society_id, user=user, action="resident_primary_set",
@@ -184,9 +216,11 @@ def delete_resident(resident_id: str, user: CurrentUser = Depends(_admins), db=D
         flat_id=_flat_id_for(db, society_id, flat_number), flat_code=flat_number,
     )
 
-    # If the household still has members, one of them must be the contact.
+    # If the household still has members, one of them must be the contact —
+    # re-elected from the occupancy's role pool (so a tenant-occupied flat picks
+    # the next tenant, not the owner).
     if was_primary:
-        promoted = resolve.ensure_primary(db, society_id, flat_number)
+        promoted = resolve.resync_primary(db, society_id, flat_number)
         if promoted is not None:
             audit.record(
                 db, society_id=society_id, user=user, action="resident_primary_set",

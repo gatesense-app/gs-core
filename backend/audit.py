@@ -22,6 +22,7 @@ from backend import db_models as m
 # Entity types
 FLAT = "flat"
 RESIDENT = "resident"
+TENANCY = "tenancy"
 
 
 def _actor_email(db, user) -> tuple[uuid.UUID | None, str | None]:

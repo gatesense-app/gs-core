@@ -333,6 +333,9 @@ def apply_plan(db, society_id, plan: dict, user=None) -> None:
     #    resident so step 3 can promote the right one without re-matching a name
     #    we may have neutralised on the way in.
     existing = plan["existing_residents"]
+    # Imported residents are the flat's owners/household — CSV import has no
+    # tenancy concept, so role defaults to owner. Tenants come only through a
+    # tenancy (routers/tenancies.py).
     resident_by_line: dict[int, m.Resident] = {}
     for vr in plan["rows"]:
         flat = flats[vr["code"]]

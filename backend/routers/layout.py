@@ -84,6 +84,7 @@ def _flat_resp(
         linked_residents=linked_residents,
         standing_rules=f.standing_rules,
         delivery_preferences=f.delivery_preferences,
+        occupancy=f.occupancy,
         deleted_at=f.deleted_at,
     )
 
@@ -735,10 +736,35 @@ def update_flat(
                 setattr(flat, key, fields[key])
         events.append(("flat_rules_changed", "Door rules updated", None))
 
+    occupancy_changed = False
+    old_occupancy = flat.occupancy
+    if "occupancy" in fields and fields["occupancy"] != old_occupancy:
+        flat.occupancy = fields["occupancy"]
+        occupancy_changed = True
+        events.append(("flat_occupancy_changed",
+                       f"Occupancy changed from {old_occupancy} to {flat.occupancy}",
+                       {"from": old_occupancy, "to": flat.occupancy}))
+
     try:
         db.flush()
     except Exception:
         raise HTTPException(409, "That flat code already exists in this society")
+
+    # A changed occupancy re-elects the gate's contact from the new role's pool
+    # (a flat flipped to tenant-occupied now reaches a tenant). Recorded if the
+    # contact actually moved.
+    if occupancy_changed:
+        primary_before = resolve.primary_resident(db, flat.society_id, flat.code)
+        before_id = primary_before.id if primary_before is not None else None
+        promoted = resolve.resync_primary(db, flat.society_id, flat.code)
+        if promoted is not None and promoted.id != before_id:
+            audit.record(
+                db, society_id=flat.society_id, user=user, action="resident_primary_set",
+                summary=f"{promoted.name} became the primary contact "
+                        f"({flat.occupancy}-occupied)",
+                entity_type=audit.RESIDENT, entity_id=promoted.id,
+                flat_id=flat.id, flat_code=flat.code,
+            )
 
     for action, summary, detail in events:
         audit.record(

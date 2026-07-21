@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -127,6 +128,12 @@ class Flat(Base):
     # delivered by a migration.
     standing_rules = Column(JSONB)
     delivery_preferences = Column(JSONB)
+    # Who lives behind the door: the owner, or a tenant. Informational for the
+    # grid's colour, but it also decides *who the gate reaches* — a tenant-occupied
+    # flat contacts a tenant, an owner-occupied one contacts the owner (the primary
+    # slot is re-elected from the matching role pool). Never NULL: an unset value
+    # would make "who does the guard call" ambiguous.
+    occupancy = Column(String(16), nullable=False, server_default=text("'owner'"))
     created_at = _created_at()
 
 
@@ -162,6 +169,17 @@ class Resident(Base):
     # E6-S3 / Q3: the flat's contact, defaulting to the first resident added.
     # Never rely on "whichever row the database returned first".
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
+    # Owner of the flat, or a tenant living in it. The first resident on a flat is
+    # its owner; everyone added after is a tenant (overridable). This is a stable
+    # label — distinct from is_primary, which is "who the gate reaches". The flat's
+    # occupancy decides which role pool is_primary is drawn from, so an owner keeps
+    # the 'owner' label even while a tenant is the one being contacted.
+    role = Column(String(16), nullable=False, server_default=text("'owner'"))
+    # A tenant belongs to a tenancy agreement (start/end dates, renewable). NULL
+    # for owners and for free-text residents. When a tenancy ends the tenant rows
+    # are soft-deleted, so the gate stops reaching them, but the link stays for
+    # history. See the Tenancy model and routers/tenancies.py.
+    tenancy_id = Column(_UUID, ForeignKey("tenancies.id", ondelete="SET NULL"))
     # e.g. [{"type": "always_allow", "match": "Swiggy"}, {"type": "never_allow", "after": "21:00"}]
     # A flat's own rules win over these when set (see tools/resolve.py).
     standing_rules = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
@@ -169,6 +187,49 @@ class Resident(Base):
     delivery_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     # Soft delete: removing a resident sets this, keeping the row for history.
     # resolve.py filters it out, so a removed resident is invisible to the gate.
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
+class Tenancy(Base):
+    """
+    A tenancy agreement over a flat: the period a set of tenants occupies it.
+
+    Tenants themselves are Residents (role='tenant') pointing back here, so the
+    gate resolves them through the same primary-contact machinery as everyone
+    else. A tenancy is *active* while `ended_at` is NULL; ending it (early
+    termination, or supersession by a renewal) sets `ended_at` and soft-deletes
+    its tenants. Renewal clones a tenancy into a fresh one linked by
+    `prior_tenancy_id`. Dates are optional (month-to-month is real). See
+    routers/tenancies.py.
+    """
+
+    __tablename__ = "tenancies"
+    __table_args__ = (
+        # At most one *active* tenancy per flat: the gate must never have two
+        # competing tenant contacts. Ended/deleted rows are kept for history and
+        # excluded from the constraint, so a flat can be re-let after one ends.
+        Index(
+            "uq_active_tenancy_per_flat",
+            "society_id", "flat_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL AND deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    # Snapshot of the flat's code, like residents/events — the gate resolves on it.
+    flat_code = Column(String(64), nullable=False)
+    # Agreement dates; both optional (unknown at entry, or month-to-month).
+    start_date = Column(Date)
+    end_date = Column(Date)
+    # Set when the tenancy stops being active — early termination or when a
+    # renewal supersedes it. NULL means active.
+    ended_at = Column(DateTime(timezone=True))
+    # Renewal chain: a renewed tenancy points at the one it replaced.
+    prior_tenancy_id = Column(_UUID, ForeignKey("tenancies.id", ondelete="SET NULL"))
     deleted_at = Column(DateTime(timezone=True))
     created_at = _created_at()
 
@@ -303,6 +364,7 @@ TENANT_TABLES = [
     "wings",
     "flats",
     "residents",
+    "tenancies",
     "layout_events",
     "users",
     "visitors",

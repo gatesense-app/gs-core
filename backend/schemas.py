@@ -1,6 +1,6 @@
 """Pydantic request/response schemas for the admin + auth API."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -158,6 +158,9 @@ class FlatResponse(BaseModel):
     # own rules apply — which is different from [] meaning "no rules".
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
+    # 'owner' or 'tenant' — who occupies the flat. Drives the grid colour and which
+    # role the gate reaches.
+    occupancy: str = "owner"
     # Soft delete: set once the flat is deleted. Lists never return a deleted
     # flat, but its detail page stays reachable to view the timeline.
     deleted_at: Optional[datetime] = None
@@ -189,6 +192,8 @@ class FlatUpdate(BaseModel):
     floor: Optional[int] = None
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
+    # 'owner' or 'tenant'. Re-elects the gate's contact from the matching role.
+    occupancy: Optional[Literal["owner", "tenant"]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +270,9 @@ class ResidentCreate(BaseModel):
     phone: Optional[str] = None
     standing_rules: list[dict[str, Any]] = Field(default_factory=list)
     delivery_preferences: dict[str, Any] = Field(default_factory=dict)
+    # 'owner' or 'tenant'. If omitted the router assigns it: the first resident on
+    # a flat is its owner, everyone added after is a tenant.
+    role: Optional[Literal["owner", "tenant"]] = None
     # platform_admin must supply this; society_admin's is taken from their JWT.
     society_id: Optional[str] = None
 
@@ -276,6 +284,8 @@ class ResidentUpdate(BaseModel):
     # E6-S3: set true to make this resident the flat's contact. There is no
     # "demote" — a flat always needs someone, so promote another instead.
     is_primary: Optional[bool] = None
+    # Re-label this resident owner/tenant; may re-elect the flat's contact.
+    role: Optional[Literal["owner", "tenant"]] = None
     standing_rules: Optional[list[dict[str, Any]]] = None
     delivery_preferences: Optional[dict[str, Any]] = None
 
@@ -288,8 +298,51 @@ class ResidentResponse(BaseModel):
     phone: Optional[str] = None
     # The one the agents contact for this flat (Q3).
     is_primary: bool = False
+    # 'owner' or 'tenant' — a stable label, distinct from is_primary.
+    role: str = "owner"
+    # Set for a tenant: the tenancy agreement they belong to.
+    tenancy_id: Optional[str] = None
     standing_rules: list[dict[str, Any]] = Field(default_factory=list)
     delivery_preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Tenancies (a tenant-occupied flat's agreement + its tenants)
+# ---------------------------------------------------------------------------
+class TenancyCreate(BaseModel):
+    """Start a tenancy on a tenant-occupied flat. Dates are optional."""
+
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class TenancyRenew(BaseModel):
+    """Renew (clone) the active tenancy with fresh dates."""
+
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class TenantCreate(BaseModel):
+    """Add a tenant to the active tenancy. First tenant becomes the contact."""
+
+    name: str = Field(min_length=1)
+    phone: Optional[str] = None
+    standing_rules: list[dict[str, Any]] = Field(default_factory=list)
+    delivery_preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+class TenancyResponse(BaseModel):
+    id: str
+    flat_id: str
+    flat_code: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    ended_at: Optional[datetime] = None
+    # Derived: 'active', 'ended', or 'expired' (active but past its end date).
+    status: str = "active"
+    prior_tenancy_id: Optional[str] = None
+    tenants: list[ResidentResponse] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
