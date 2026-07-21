@@ -20,6 +20,9 @@ const STATUS_COLOR = {
   approved: '#22c55e', denied: '#ef4444', escalated: '#f97316', expired: '#64748b',
 }
 
+// History timeline shows at most this many records per page.
+const PAGE_SIZE = 10
+
 const s = {
   page: { maxWidth: 860, margin: '0 auto', padding: '32px 24px' },
   back: { fontSize: 13, color: 'var(--c-muted)', marginBottom: 24, display: 'block' },
@@ -120,6 +123,7 @@ export default function FlatDetail() {
   const [tEnd, setTEnd] = useState('')
   const [tenantName, setTenantName] = useState('')
   const [tenantPhone, setTenantPhone] = useState('')
+  const [historyPage, setHistoryPage] = useState(0)
   const [renewing, setRenewing] = useState(false)
   const [renewStart, setRenewStart] = useState('')
   const [renewEnd, setRenewEnd] = useState('')
@@ -371,6 +375,9 @@ export default function FlatDetail() {
   const owners = residents.filter((r) => r.role !== 'tenant')
   const activeTenancy = tenancies.find((t) => t.status !== 'ended') || null
   const pastTenancies = tenancies.filter((t) => t.status === 'ended')
+  // History is paginated at 10/page; clamp in case the list shrank after a reload.
+  const pageCount = Math.max(1, Math.ceil(timeline.length / PAGE_SIZE))
+  const page = Math.min(historyPage, pageCount - 1)
 
   // The door's *effective* rules — what the gate actually reads. The flat's own
   // win when set (non-null); otherwise they fall back, field-independently, to
@@ -746,7 +753,7 @@ export default function FlatDetail() {
           <div style={s.none}>No changes recorded yet.</div>
         ) : (
           <div>
-            {timeline.map((e) => (
+            {timeline.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map((e) => (
               <div key={e.id} style={{ display: 'flex', gap: 12, padding: '10px 0',
                                        borderBottom: '1px solid var(--c-row-border)' }}>
                 <span aria-hidden="true" style={{
@@ -762,6 +769,21 @@ export default function FlatDetail() {
                 </div>
               </div>
             ))}
+            {pageCount > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+                <button type="button" className="btn btn--ghost btn--sm"
+                        disabled={page === 0} onClick={() => setHistoryPage(page - 1)}>
+                  ← Newer
+                </button>
+                <span style={{ fontSize: 13, color: 'var(--c-muted)' }}>
+                  Page {page + 1} of {pageCount}
+                </span>
+                <button type="button" className="btn btn--ghost btn--sm"
+                        disabled={page >= pageCount - 1} onClick={() => setHistoryPage(page + 1)}>
+                  Older →
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
