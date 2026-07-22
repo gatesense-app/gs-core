@@ -152,6 +152,64 @@ def test_releasing_a_parking_number_frees_it(society):
     assert "parking_removed" in _timeline_actions(society, flat["id"])
 
 
+# --- Assigning a vehicle to a parking number --------------------------------
+
+def _add_parking(society_id, flat_id, number):
+    r = client.post(f"/flats/{flat_id}/parking", headers=_hdr(society_id),
+                    json={"parking_number": number})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_assign_parking_on_create_and_reassign_on_edit(society):
+    flat = _flat(society)
+    p1 = _add_parking(society, flat["id"], "P-1")
+    p2 = _add_parking(society, flat["id"], "P-2")
+
+    r = client.post(f"/flats/{flat['id']}/vehicles", headers=_hdr(society),
+                    json={"registration_number": "MH12AB1234", "vehicle_type": "four_wheeler",
+                          "owner_name": "Ravi", "parking_slot_id": p1["id"]})
+    assert r.status_code == 201, r.text
+    v = r.json()
+    assert v["parking_slot_id"] == p1["id"]
+    assert v["parking_number"] == "P-1"
+
+    # Reassign to P-2.
+    r = client.patch(f"/vehicles/{v['id']}", headers=_hdr(society),
+                     json={"parking_slot_id": p2["id"]})
+    assert r.json()["parking_number"] == "P-2"
+
+    # Clear the assignment.
+    r = client.patch(f"/vehicles/{v['id']}", headers=_hdr(society),
+                     json={"parking_slot_id": None})
+    assert r.json()["parking_slot_id"] is None
+    assert r.json()["parking_number"] is None
+
+
+def test_cannot_assign_another_flats_parking(society):
+    a = _flat(society, "101")
+    b = _flat(society, "102")
+    p_b = _add_parking(society, b["id"], "P-9")
+    r = client.post(f"/flats/{a['id']}/vehicles", headers=_hdr(society),
+                    json={"registration_number": "MH01AA1", "vehicle_type": "two_wheeler",
+                          "owner_name": "X", "parking_slot_id": p_b["id"]})
+    assert r.status_code == 400
+
+
+def test_releasing_a_parking_number_unassigns_its_vehicle(society):
+    flat = _flat(society)
+    p = _add_parking(society, flat["id"], "P-1")
+    v = client.post(f"/flats/{flat['id']}/vehicles", headers=_hdr(society),
+                    json={"registration_number": "MH12AB1234", "vehicle_type": "four_wheeler",
+                          "owner_name": "Ravi", "parking_slot_id": p["id"]}).json()
+    assert client.delete(f"/parking/{p['id']}", headers=_hdr(society)).status_code == 204
+    # The vehicle survives, but its assignment is cleared.
+    got = client.get(f"/flats/{flat['id']}/vehicles", headers=_hdr(society)).json()
+    assert len(got) == 1
+    assert got[0]["parking_slot_id"] is None
+    assert got[0]["parking_number"] is None
+
+
 # --- Tenancy of the data ----------------------------------------------------
 
 def test_vehicles_do_not_cross_societies(society):

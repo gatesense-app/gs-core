@@ -264,6 +264,10 @@ class Vehicle(Base):
     vehicle_type = Column(String(16), nullable=False)
     # The primary owner as per the RC book — free text, not a resident link.
     owner_name = Column(String(200), nullable=False)
+    # Optional: the parking number this vehicle is assigned to (one of the flat's
+    # slots). Nulled if that slot is released. SET NULL only fires on a hard
+    # delete; the release path clears it explicitly since slots are soft-deleted.
+    parking_slot_id = Column(_UUID, ForeignKey("parking_slots.id", ondelete="SET NULL"))
     deleted_at = Column(DateTime(timezone=True))
     created_at = _created_at()
 

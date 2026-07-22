@@ -353,12 +353,17 @@ class VehicleCreate(BaseModel):
     vehicle_type: Literal["two_wheeler", "four_wheeler"]
     # Primary owner as per the RC book (free text, may differ from residents).
     owner_name: str = Field(min_length=1, max_length=200)
+    # Optional: one of the flat's parking numbers to assign this vehicle to.
+    parking_slot_id: Optional[str] = None
 
 
 class VehicleUpdate(BaseModel):
     registration_number: Optional[str] = Field(default=None, min_length=1, max_length=20)
     vehicle_type: Optional[Literal["two_wheeler", "four_wheeler"]] = None
     owner_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    # Send a slot id to (re)assign, or null to clear the assignment. Unset leaves
+    # it alone — the router reads exclude_unset, so "not sent" ≠ "sent as null".
+    parking_slot_id: Optional[str] = None
 
 
 class VehicleResponse(BaseModel):
@@ -369,6 +374,9 @@ class VehicleResponse(BaseModel):
     registration_number: str
     vehicle_type: str
     owner_name: str
+    # The assigned parking slot, if any, with its number resolved for display.
+    parking_slot_id: Optional[str] = None
+    parking_number: Optional[str] = None
 
 
 class ParkingCreate(BaseModel):

@@ -46,12 +46,28 @@ def _get_flat(db, flat_id: str) -> m.Flat:
     return flat
 
 
-def _vehicle_resp(v: m.Vehicle) -> VehicleResponse:
+def _vehicle_resp(db, v: m.Vehicle) -> VehicleResponse:
+    # Resolve the assigned slot's number for display; a released (soft-deleted)
+    # slot shows as unassigned even if a stale id somehow lingers.
+    number = None
+    if v.parking_slot_id is not None:
+        slot = db.get(m.ParkingSlot, v.parking_slot_id)
+        number = slot.parking_number if slot is not None and slot.deleted_at is None else None
     return VehicleResponse(
         id=str(v.id), society_id=str(v.society_id), flat_id=str(v.flat_id),
         flat_code=v.flat_code, registration_number=v.registration_number,
         vehicle_type=v.vehicle_type, owner_name=v.owner_name,
+        parking_slot_id=str(v.parking_slot_id) if v.parking_slot_id else None,
+        parking_number=number,
     )
+
+
+def _resolve_slot(db, flat: m.Flat, slot_id):
+    """Validate a parking slot id belongs to this live flat; return the slot."""
+    slot = db.get(m.ParkingSlot, parse_uuid(slot_id))
+    if slot is None or slot.deleted_at is not None or slot.flat_id != flat.id:
+        raise HTTPException(400, "That parking number is not one of this flat's")
+    return slot
 
 
 def _parking_resp(p: m.ParkingSlot) -> ParkingResponse:
@@ -72,7 +88,7 @@ def list_vehicles(flat_id: str, _: CurrentUser = Depends(_admins), db=Depends(ge
         .where(m.Vehicle.flat_id == flat.id, m.Vehicle.deleted_at.is_(None))
         .order_by(m.Vehicle.created_at.asc(), m.Vehicle.id.asc())
     ).scalars().all()
-    return [_vehicle_resp(v) for v in rows]
+    return [_vehicle_resp(db, v) for v in rows]
 
 
 @router.post("/flats/{flat_id}/vehicles", status_code=201, response_model=VehicleResponse)
@@ -95,10 +111,13 @@ def add_vehicle(
     if exists:
         raise HTTPException(409, f"Vehicle '{reg}' is already registered in this society")
 
+    slot = _resolve_slot(db, flat, body.parking_slot_id) if body.parking_slot_id else None
+
     vehicle = m.Vehicle(
         society_id=flat.society_id, flat_id=flat.id, flat_code=flat.code,
         registration_number=reg, vehicle_type=body.vehicle_type,
         owner_name=body.owner_name.strip(),
+        parking_slot_id=slot.id if slot is not None else None,
     )
     db.add(vehicle)
     try:
@@ -106,14 +125,17 @@ def add_vehicle(
     except Exception:
         raise HTTPException(409, f"Vehicle '{reg}' is already registered in this society")
 
+    summary = (f"{_TYPE_LABEL.get(vehicle.vehicle_type, vehicle.vehicle_type)} "
+               f"{reg} added ({vehicle.owner_name})")
+    if slot is not None:
+        summary += f", parking {slot.parking_number}"
     audit.record(
         db, society_id=flat.society_id, user=user, action="vehicle_added",
-        summary=f"{_TYPE_LABEL.get(vehicle.vehicle_type, vehicle.vehicle_type)} "
-                f"{reg} added ({vehicle.owner_name})",
+        summary=summary,
         entity_type=audit.VEHICLE, entity_id=vehicle.id,
         flat_id=flat.id, flat_code=flat.code,
     )
-    return _vehicle_resp(vehicle)
+    return _vehicle_resp(db, vehicle)
 
 
 @router.patch("/vehicles/{vehicle_id}", response_model=VehicleResponse)
@@ -132,20 +154,32 @@ def update_vehicle(
         fields["registration_number"] = fields["registration_number"].strip().upper()
     if "owner_name" in fields and fields["owner_name"]:
         fields["owner_name"] = fields["owner_name"].strip()
-    changed = {k: v for k, v in fields.items() if getattr(vehicle, k) != v}
-    if not changed:
-        return _vehicle_resp(vehicle)
 
+    # Parking is handled apart from the scalar fields: the value is a slot id (or
+    # null to clear) that must be validated against the flat and mapped to a UUID.
+    bits = []
+    if "parking_slot_id" in fields:
+        raw = fields.pop("parking_slot_id")
+        flat = _get_flat(db, str(vehicle.flat_id))
+        new_slot = _resolve_slot(db, flat, raw) if raw else None
+        new_id = new_slot.id if new_slot is not None else None
+        if new_id != vehicle.parking_slot_id:
+            vehicle.parking_slot_id = new_id
+            bits.append(f"parking → {new_slot.parking_number if new_slot else 'unassigned'}")
+
+    changed = {k: v for k, v in fields.items() if getattr(vehicle, k) != v}
     for key, value in changed.items():
         setattr(vehicle, key, value)
+    if not changed and not bits:
+        return _vehicle_resp(db, vehicle)
+
     try:
         db.flush()
     except Exception:
         raise HTTPException(409, "That registration number already exists in this society")
 
-    bits = []
     if "registration_number" in changed:
-        bits.append(f"reg → {vehicle.registration_number}")
+        bits.insert(0, f"reg → {vehicle.registration_number}")
     if "vehicle_type" in changed:
         bits.append(f"type → {_TYPE_LABEL.get(vehicle.vehicle_type, vehicle.vehicle_type)}")
     if "owner_name" in changed:
@@ -156,7 +190,7 @@ def update_vehicle(
         entity_type=audit.VEHICLE, entity_id=vehicle.id,
         flat_id=vehicle.flat_id, flat_code=vehicle.flat_code,
     )
-    return _vehicle_resp(vehicle)
+    return _vehicle_resp(db, vehicle)
 
 
 @router.delete("/vehicles/{vehicle_id}", status_code=204)
@@ -234,6 +268,15 @@ def delete_parking(parking_id: str, user: CurrentUser = Depends(_admins), db=Dep
     if slot is None or slot.deleted_at is not None:
         raise HTTPException(404, "Parking number not found")
     slot.deleted_at = _now()
+    # Slots are soft-deleted, so the FK's SET NULL never fires — unassign any
+    # vehicle still pointing at this number by hand, or it would show a released
+    # spot. (The vehicle row is untouched otherwise; only the assignment clears.)
+    assigned = db.execute(
+        select(m.Vehicle).where(
+            m.Vehicle.parking_slot_id == slot.id, m.Vehicle.deleted_at.is_(None))
+    ).scalars().all()
+    for v in assigned:
+        v.parking_slot_id = None
     db.flush()
     audit.record(
         db, society_id=slot.society_id, user=user, action="parking_removed",
