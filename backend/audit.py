@@ -23,6 +23,8 @@ from backend import db_models as m
 FLAT = "flat"
 RESIDENT = "resident"
 TENANCY = "tenancy"
+VEHICLE = "vehicle"
+PARKING = "parking"
 
 
 def _actor_email(db, user) -> tuple[uuid.UUID | None, str | None]:

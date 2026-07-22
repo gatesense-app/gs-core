@@ -23,6 +23,8 @@ const STATUS_COLOR = {
 // History timeline shows at most this many records per page.
 const PAGE_SIZE = 10
 
+const VEH_TYPE_LABEL = { two_wheeler: '2-wheeler', four_wheeler: '4-wheeler' }
+
 const s = {
   page: { maxWidth: 860, margin: '0 auto', padding: '32px 24px' },
   back: { fontSize: 13, color: 'var(--c-muted)', marginBottom: 24, display: 'block' },
@@ -54,6 +56,16 @@ const s = {
     display: 'inline-block', marginLeft: 8, padding: '1px 8px', borderRadius: 99,
     fontSize: 11, fontWeight: 600, background: '#ef444422', color: '#b91c1c',
     border: '1px solid #ef444455',
+  },
+  typeBadge: {
+    display: 'inline-block', marginLeft: 8, padding: '2px 9px', borderRadius: 99,
+    fontSize: 11, fontWeight: 600, background: '#6366f122', color: '#4338ca',
+    border: '1px solid #6366f155',
+  },
+  parkChip: {
+    display: 'inline-flex', alignItems: 'center', gap: 8, padding: '5px 12px',
+    borderRadius: 8, border: '1px solid var(--c-border)', background: 'var(--c-panel)',
+    fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)',
   },
   toggle: (active) => ({
     padding: '4px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -100,6 +112,8 @@ const EVENT_DOT = {
   flat_rules_changed: '#3b82f6', resident_edited: '#3b82f6',
   flat_occupancy_changed: '#f59e0b', resident_role_changed: '#f59e0b',
   tenancy_started: '#0ea5e9', tenancy_renewed: '#0ea5e9', tenancy_ended: '#ef4444',
+  vehicle_added: '#22c55e', vehicle_edited: '#3b82f6', vehicle_removed: '#ef4444',
+  parking_added: '#22c55e', parking_removed: '#ef4444',
   resident_primary_set: '#a855f7', flat_linked: '#a855f7',
   flat_deleted: '#ef4444', resident_deleted: '#ef4444',
 }
@@ -113,6 +127,8 @@ export default function FlatDetail() {
   const [notFound, setNotFound] = useState(false)
   const [residents, setResidents] = useState([])
   const [tenancies, setTenancies] = useState([])
+  const [vehicles, setVehicles] = useState([])
+  const [parking, setParking] = useState([])
   const [sessions, setSessions] = useState([])
   const [timeline, setTimeline] = useState([])
   const [error, setError] = useState('')
@@ -123,6 +139,15 @@ export default function FlatDetail() {
   const [tEnd, setTEnd] = useState('')
   const [tenantName, setTenantName] = useState('')
   const [tenantPhone, setTenantPhone] = useState('')
+  // Vehicle + parking forms
+  const [vehReg, setVehReg] = useState('')
+  const [vehType, setVehType] = useState('four_wheeler')
+  const [vehOwner, setVehOwner] = useState('')
+  const [vehEditId, setVehEditId] = useState(null)
+  const [vehEdit, setVehEdit] = useState({ registration_number: '', vehicle_type: 'four_wheeler', owner_name: '' })
+  const [vehConfirmId, setVehConfirmId] = useState(null)
+  const [parkNumber, setParkNumber] = useState('')
+
   const [historyPage, setHistoryPage] = useState(0)
   const [renewing, setRenewing] = useState(false)
   const [renewStart, setRenewStart] = useState('')
@@ -167,6 +192,9 @@ export default function FlatDetail() {
       )
       // Tenancy agreements (active + past) for a tenant-occupied flat.
       setTenancies(await apiFetch(`/flats/${id}/tenancies`).catch(() => []))
+      // Vehicles + parking numbers registered to this flat.
+      setVehicles(await apiFetch(`/flats/${id}/vehicles`).catch(() => []))
+      setParking(await apiFetch(`/flats/${id}/parking`).catch(() => []))
       // The audit trail — every change to this flat and its residents, newest
       // first. Reachable even for a soft-deleted flat.
       setTimeline(await apiFetch(`/flats/${id}/timeline`).catch(() => []))
@@ -278,6 +306,53 @@ export default function FlatDetail() {
       await apiFetch(`/tenancies/${tenancyId}/end`, { method: 'POST' })
       setConfirmEnd(false)
     })
+  }
+
+  // Vehicles + parking reuse the same busy/error/reload wrapper as tenancies.
+  function addVehicle(e) {
+    e.preventDefault()
+    if (!vehReg.trim() || !vehOwner.trim()) return
+    tenancyAction(async () => {
+      await apiFetch(`/flats/${id}/vehicles`, {
+        method: 'POST',
+        body: { registration_number: vehReg.trim(), vehicle_type: vehType, owner_name: vehOwner.trim() },
+      })
+      setVehReg(''); setVehOwner(''); setVehType('four_wheeler')
+    })
+  }
+
+  function startVehicleEdit(v) {
+    setVehEditId(v.id)
+    setVehEdit({ registration_number: v.registration_number, vehicle_type: v.vehicle_type, owner_name: v.owner_name })
+    setVehConfirmId(null)
+  }
+
+  function saveVehicle(e) {
+    e.preventDefault()
+    tenancyAction(async () => {
+      await apiFetch(`/vehicles/${vehEditId}`, { method: 'PATCH', body: vehEdit })
+      setVehEditId(null)
+    })
+  }
+
+  function removeVehicle(v) {
+    tenancyAction(async () => {
+      await apiFetch(`/vehicles/${v.id}`, { method: 'DELETE' })
+      setVehConfirmId(null)
+    })
+  }
+
+  function addParking(e) {
+    e.preventDefault()
+    if (!parkNumber.trim()) return
+    tenancyAction(async () => {
+      await apiFetch(`/flats/${id}/parking`, { method: 'POST', body: { parking_number: parkNumber.trim() } })
+      setParkNumber('')
+    })
+  }
+
+  function removeParking(p) {
+    tenancyAction(async () => { await apiFetch(`/parking/${p.id}`, { method: 'DELETE' }) })
   }
 
   async function addResident(e) {
@@ -696,6 +771,114 @@ export default function FlatDetail() {
           )}
         </div>
       )}
+
+      {/* Vehicles */}
+      <div style={s.card}>
+        <h2 className="section-title">Vehicles</h2>
+        {vehicles.length === 0 ? (
+          <div style={{ ...s.none, marginBottom: 4 }}>No vehicles registered yet.</div>
+        ) : (
+          vehicles.map((v) => (
+            <div key={v.id} style={s.resRow}>
+              {vehEditId === v.id ? (
+                <form onSubmit={saveVehicle} style={{ ...s.editForm, marginTop: 0, flex: 1 }}>
+                  <div style={{ width: 150 }}>
+                    <label style={ui.label}>Reg. number</label>
+                    <input className="input" value={vehEdit.registration_number}
+                           onChange={(e) => setVehEdit({ ...vehEdit, registration_number: e.target.value })} required />
+                  </div>
+                  <div style={{ width: 130 }}>
+                    <label style={ui.label}>Type</label>
+                    <select className="input" value={vehEdit.vehicle_type}
+                            onChange={(e) => setVehEdit({ ...vehEdit, vehicle_type: e.target.value })}>
+                      <option value="four_wheeler">4-wheeler</option>
+                      <option value="two_wheeler">2-wheeler</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <label style={ui.label}>Owner (RC)</label>
+                    <input className="input" value={vehEdit.owner_name}
+                           onChange={(e) => setVehEdit({ ...vehEdit, owner_name: e.target.value })} required />
+                  </div>
+                  <button className="btn btn--primary btn--sm" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setVehEditId(null)}>Cancel</button>
+                </form>
+              ) : (
+                <>
+                  <div>
+                    <div style={s.resName}>
+                      <span style={{ fontFamily: 'monospace' }}>{v.registration_number}</span>
+                      <span style={s.typeBadge}>{VEH_TYPE_LABEL[v.vehicle_type] || v.vehicle_type}</span>
+                    </div>
+                    <div style={s.resPhone}>Owner (RC): {v.owner_name}</div>
+                  </div>
+                  <div style={s.actions}>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => startVehicleEdit(v)}>Edit</button>
+                    {vehConfirmId === v.id ? (
+                      <>
+                        <span style={{ fontSize: 13, color: colors.error }}>Remove {v.registration_number}?</span>
+                        <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => removeVehicle(v)}>
+                          Confirm remove
+                        </button>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => setVehConfirmId(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setVehConfirmId(v.id); setVehEditId(null) }}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))
+        )}
+
+        {/* Add vehicle */}
+        <form onSubmit={addVehicle} style={s.editForm}>
+          <div style={{ width: 150 }}>
+            <label style={ui.label}>Add vehicle · reg. number</label>
+            <input className="input" value={vehReg} onChange={(e) => setVehReg(e.target.value)} placeholder="MH12AB1234" required />
+          </div>
+          <div style={{ width: 130 }}>
+            <label style={ui.label}>Type</label>
+            <select className="input" value={vehType} onChange={(e) => setVehType(e.target.value)}>
+              <option value="four_wheeler">4-wheeler</option>
+              <option value="two_wheeler">2-wheeler</option>
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <label style={ui.label}>Owner (as per RC)</label>
+            <input className="input" value={vehOwner} onChange={(e) => setVehOwner(e.target.value)} placeholder="Full name" required />
+          </div>
+          <button className="btn btn--primary btn--sm" disabled={busy}>{busy ? 'Adding…' : 'Add vehicle'}</button>
+        </form>
+      </div>
+
+      {/* Parking numbers */}
+      <div style={s.card}>
+        <h2 className="section-title">Parking</h2>
+        {parking.length === 0 ? (
+          <div style={{ ...s.none, marginBottom: 12 }}>No parking numbers allotted yet.</div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            {parking.map((p) => (
+              <span key={p.id} style={s.parkChip}>
+                {p.parking_number}
+                <button type="button" className="chip-x" aria-label={`Release parking ${p.parking_number}`}
+                        disabled={busy} onClick={() => removeParking(p)}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <form onSubmit={addParking} style={s.editForm}>
+          <div style={{ width: 180 }}>
+            <label style={ui.label}>Add parking number</label>
+            <input className="input" value={parkNumber} onChange={(e) => setParkNumber(e.target.value)} placeholder="e.g. P-12" required />
+          </div>
+          <button className="btn btn--primary btn--sm" disabled={busy}>{busy ? 'Adding…' : 'Add parking'}</button>
+        </form>
+      </div>
 
       {/* The door's effective rules — what the gate actually enforces */}
       <div style={s.card}>

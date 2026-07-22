@@ -234,6 +234,66 @@ class Tenancy(Base):
     created_at = _created_at()
 
 
+class Vehicle(Base):
+    """
+    A vehicle registered against a flat (D1). Kept minimal for now: the RC-book
+    registration number and the primary owner's name (which may differ from any
+    resident — the RC owner is the source of truth). Soft-deleted like everyone
+    else, so a flat's vehicle history is never lost.
+    """
+
+    __tablename__ = "vehicles"
+    __table_args__ = (
+        # A registration number is unique to one live vehicle in a society; a
+        # soft-deleted one frees the number for re-entry (a typo, or a re-sale).
+        Index(
+            "uq_vehicle_reg_per_society",
+            "society_id", "registration_number",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    # Snapshot of the flat's code, like residents/tenancies.
+    flat_code = Column(String(64), nullable=False)
+    registration_number = Column(String(20), nullable=False)
+    # 'two_wheeler' or 'four_wheeler'.
+    vehicle_type = Column(String(16), nullable=False)
+    # The primary owner as per the RC book — free text, not a resident link.
+    owner_name = Column(String(200), nullable=False)
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
+class ParkingSlot(Base):
+    """
+    A parking number the society allotted to a flat. A flat may hold several, so
+    this is a per-flat list rather than a column. Independent of vehicles for now.
+    """
+
+    __tablename__ = "parking_slots"
+    __table_args__ = (
+        # A physical parking number is allotted to at most one live flat.
+        Index(
+            "uq_parking_number_per_society",
+            "society_id", "parking_number",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    flat_code = Column(String(64), nullable=False)
+    parking_number = Column(String(32), nullable=False)
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -365,6 +425,8 @@ TENANT_TABLES = [
     "flats",
     "residents",
     "tenancies",
+    "vehicles",
+    "parking_slots",
     "layout_events",
     "users",
     "visitors",

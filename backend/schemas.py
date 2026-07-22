@@ -346,6 +346,44 @@ class TenancyResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Vehicles + parking (per flat)
+# ---------------------------------------------------------------------------
+class VehicleCreate(BaseModel):
+    registration_number: str = Field(min_length=1, max_length=20)
+    vehicle_type: Literal["two_wheeler", "four_wheeler"]
+    # Primary owner as per the RC book (free text, may differ from residents).
+    owner_name: str = Field(min_length=1, max_length=200)
+
+
+class VehicleUpdate(BaseModel):
+    registration_number: Optional[str] = Field(default=None, min_length=1, max_length=20)
+    vehicle_type: Optional[Literal["two_wheeler", "four_wheeler"]] = None
+    owner_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class VehicleResponse(BaseModel):
+    id: str
+    society_id: str
+    flat_id: str
+    flat_code: str
+    registration_number: str
+    vehicle_type: str
+    owner_name: str
+
+
+class ParkingCreate(BaseModel):
+    parking_number: str = Field(min_length=1, max_length=32)
+
+
+class ParkingResponse(BaseModel):
+    id: str
+    society_id: str
+    flat_id: str
+    flat_code: str
+    parking_number: str
+
+
+# ---------------------------------------------------------------------------
 # Resident portal (self-service — always scoped to the caller's own flat)
 # ---------------------------------------------------------------------------
 class PortalMeResponse(BaseModel):

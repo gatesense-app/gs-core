@@ -42,7 +42,7 @@ from backend.deps import (
 from backend.pipeline import handle_resident_reply, handle_visitor_entry, serialize
 from backend.ratelimit import limit_replies, limit_sessions
 from backend.realtime import manager
-from backend.routers import admin, auth, imports, layout, portal, residents, societies, tenancies, users, visitors
+from backend.routers import admin, auth, imports, layout, portal, residents, societies, tenancies, users, vehicles, visitors
 from backend.routers.common import parse_uuid
 from backend.security import decode_access_token
 from backend.timeouts import run_sweeper
@@ -87,6 +87,7 @@ app.include_router(societies.router)
 app.include_router(residents.router)
 app.include_router(layout.router)  # wings + flats (E4)
 app.include_router(tenancies.router)  # tenant-occupied flat agreements
+app.include_router(vehicles.router)   # per-flat vehicle records + parking
 app.include_router(imports.router)  # bulk resident CSV import (E3)
 app.include_router(users.router)
 app.include_router(visitors.router)
