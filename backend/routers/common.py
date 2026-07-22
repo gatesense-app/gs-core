@@ -9,17 +9,21 @@ from backend.deps import CurrentUser
 
 def normalize_phone(raw: str | None) -> str | None:
     """
-    Canonical form of a phone number for storage + login lookup.
+    Canonical form of a phone number for storage + login lookup: the bare 10-digit
+    mobile number, with any country code and formatting dropped.
 
-    Strips spaces, dashes, parentheses and dots so a resident typing "+91 98…"
-    matches the stored "+9198…". Kept deliberately loose (no country-code logic):
-    both the provisioning write and the login read run through here, so as long as
-    they agree the exact shape doesn't matter. Returns None for an empty value.
+    Keeps digits only, then takes the last 10 — so "+91 98000 00001", "9198000…"
+    and "098000…" all reduce to the same "9800000001" a resident actually dials.
+    Both the provisioning write and the login read run through here, so a resident
+    signs in with just their 10-digit number. A value with fewer than 10 digits is
+    kept as-is (nothing to trim); an empty value returns None.
     """
     if not raw:
         return None
-    cleaned = "".join(c for c in raw if c.isdigit() or c == "+")
-    return cleaned or None
+    digits = "".join(c for c in raw if c.isdigit())
+    if not digits:
+        return None
+    return digits[-10:] if len(digits) > 10 else digits
 
 
 def parse_uuid(val: str) -> uuid.UUID:

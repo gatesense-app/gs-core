@@ -88,10 +88,11 @@ def test_provision_creates_a_phone_login_that_reaches_the_flat(society):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["created_count"] == 1
-    assert body["created"][0]["phone"] == "+919800000001"  # normalised
+    assert body["created"][0]["phone"] == "9800000001"  # bare 10 digits, no +91
 
-    # The resident can log in by phone (spaces and all) with the shared password.
-    login = client.post("/auth/login", json={"email": "+91 98000 00001", "password": DEFAULT_PW})
+    # The resident can log in with just the 10-digit number (or with +91 — both
+    # normalise to the same thing).
+    login = client.post("/auth/login", json={"email": "9800000001", "password": DEFAULT_PW})
     assert login.status_code == 200, login.text
     assert login.json()["role"] == "resident"
 
