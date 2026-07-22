@@ -300,11 +300,25 @@ class ParkingSlot(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Resident logins provisioned from imported residents sign in by phone,
+        # not email. At most one account per phone; NULLs (admins/guards) are free.
+        Index(
+            "uq_users_phone",
+            "phone",
+            unique=True,
+            postgresql_where=text("phone IS NOT NULL"),
+        ),
+    )
 
     id = _pk()
     # NULL for platform_admin (belongs to no society)
     society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"))
-    email = Column(String(255), nullable=False, unique=True)
+    # Nullable: a phone-only resident login has no email. Still unique — Postgres
+    # allows many NULLs in a UNIQUE column, so admins/guards keep the guarantee.
+    email = Column(String(255), unique=True)
+    # Alternate login identifier for residents (see routers/auth.login).
+    phone = Column(String(32))
     password_hash = Column(String(255), nullable=False)
     role = Column(String(32), nullable=False)  # platform_admin|society_admin|guard|resident
     full_name = Column(String(200))

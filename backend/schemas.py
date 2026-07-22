@@ -12,7 +12,10 @@ Role = Literal["platform_admin", "society_admin", "guard", "resident"]
 # Auth
 # ---------------------------------------------------------------------------
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # An email (admins/guards) or a phone (provisioned residents). Kept a plain
+    # str, not EmailStr, so a phone number isn't rejected before we can look it up.
+    # The field name stays `email` to avoid a breaking client rename.
+    email: str
     password: str
 
 
@@ -424,11 +427,44 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    email: str
+    # Phone-only resident logins have no email.
+    email: Optional[str] = None
+    phone: Optional[str] = None
     role: Role
     full_name: Optional[str] = None
     society_id: Optional[str] = None
     is_active: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Bulk-provision resident logins from imported residents
+# ---------------------------------------------------------------------------
+class ProvisionRequest(BaseModel):
+    # A shared default password every provisioned resident logs in with. Admin's
+    # choice (pilot-grade — there is no reset flow yet).
+    default_password: str = Field(min_length=6)
+    wing_id: Optional[str] = None       # narrow to one building; all wings if omitted
+    society_id: Optional[str] = None    # platform_admin only
+
+
+class ProvisionedRow(BaseModel):
+    resident_id: str
+    name: str
+    flat_number: str
+    phone: str
+
+
+class SkippedRow(BaseModel):
+    name: str
+    flat_number: str
+    reason: str
+
+
+class ProvisionResult(BaseModel):
+    created_count: int
+    skipped_count: int
+    created: list[ProvisionedRow] = Field(default_factory=list)
+    skipped: list[SkippedRow] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
