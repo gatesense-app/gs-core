@@ -116,6 +116,11 @@ export default function Layout() {
   const [confirmFlat, setConfirmFlat] = useState(null)
   const [confirmLink, setConfirmLink] = useState(null)  // prior deleted flat found on add
 
+  // Grid search + filters
+  const [search, setSearch] = useState('')
+  const [fOccupancy, setFOccupancy] = useState('all')  // all | owner | tenant
+  const [fStatus, setFStatus] = useState('all')        // all | occupied | vacant
+
   // society_admin's society comes from the JWT; platform_admin must name one.
   const sq = isPlatform ? societyId : ''
   const wingQuery = isPlatform ? `?society_id=${societyId}` : ''
@@ -174,6 +179,9 @@ export default function Layout() {
 
   useEffect(() => {
     setNotice([])
+    setSearch('')
+    setFOccupancy('all')
+    setFStatus('all')
     loadFlats(wingId)
   }, [wingId, loadFlats])
 
@@ -328,10 +336,31 @@ export default function Layout() {
     }
   }
 
+  // Search (flat number/code or primary contact name) + occupancy/status filters.
+  const filteredFlats = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return flats.filter((f) => {
+      const key = occKey(f.society_id, f.code)
+      const isOccupied = occupied.has(key)
+      if (fStatus === 'occupied' && !isOccupied) return false
+      if (fStatus === 'vacant' && isOccupied) return false
+      if (fOccupancy !== 'all' && (f.occupancy || 'owner') !== fOccupancy) return false
+      if (q) {
+        const contact = (contacts.get(key) || '').toLowerCase()
+        if (!f.code.toLowerCase().includes(q) &&
+            !String(f.flat_number).toLowerCase().includes(q) &&
+            !contact.includes(q)) return false
+      }
+      return true
+    })
+  }, [flats, occupied, contacts, search, fOccupancy, fStatus])
+
+  const filtersActive = search.trim() !== '' || fOccupancy !== 'all' || fStatus !== 'all'
+
   // Group flats into rows, one floor per row, highest floor at the top.
   const floors = useMemo(() => {
     const byFloor = new Map()
-    for (const f of flats) {
+    for (const f of filteredFlats) {
       if (!byFloor.has(f.floor)) byFloor.set(f.floor, [])
       byFloor.get(f.floor).push(f)
     }
@@ -339,7 +368,7 @@ export default function Layout() {
       floor,
       flats: byFloor.get(floor).sort((a, b) => (a.flat_number > b.flat_number ? 1 : -1)),
     }))
-  }, [flats])
+  }, [filteredFlats])
 
   const occCount = useMemo(
     () => flats.filter((f) => occupied.has(occKey(f.society_id, f.code))).length,
@@ -580,6 +609,47 @@ export default function Layout() {
       )}
 
       {wingId && !loading && flats.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+          <div style={{ flex: '1 1 220px', minWidth: 180 }}>
+            <label style={ui.label}>Search</label>
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)}
+                   placeholder="Flat number or contact name" />
+          </div>
+          <div style={{ width: 150 }}>
+            <label style={ui.label}>Occupancy</label>
+            <select className="input" value={fOccupancy} onChange={(e) => setFOccupancy(e.target.value)}>
+              <option value="all">All</option>
+              <option value="owner">Owner-occupied</option>
+              <option value="tenant">Tenant-occupied</option>
+            </select>
+          </div>
+          <div style={{ width: 150 }}>
+            <label style={ui.label}>Status</label>
+            <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="all">All</option>
+              <option value="occupied">Occupied</option>
+              <option value="vacant">Vacant</option>
+            </select>
+          </div>
+          {filtersActive && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 2 }}>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                {filteredFlats.length} of {flats.length}
+              </span>
+              <button type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => { setSearch(''); setFOccupancy('all'); setFStatus('all') }}>
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {wingId && !loading && flats.length > 0 && filteredFlats.length === 0 && (
+        <div style={ui.sub}>No flats match these filters.</div>
+      )}
+
+      {wingId && !loading && filteredFlats.length > 0 && (
         /* Wide floors scroll inside their own container so the page body never
            scrolls sideways at 375px (mirrors the .table-wrap pattern). */
         <div className="table-wrap">
