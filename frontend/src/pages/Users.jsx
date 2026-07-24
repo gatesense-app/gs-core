@@ -11,6 +11,7 @@ const ROLE_COLOR = {
 }
 
 const emptyForm = { email: '', password: '', role: 'guard', full_name: '', society_id: '' }
+const PAGE_SIZE = 25
 
 export default function Users() {
   const { user } = useAuth()
@@ -20,6 +21,11 @@ export default function Users() {
   const [form, setForm] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [page, setPage] = useState(0)
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const p = Math.min(page, pageCount - 1)
+  const pageRows = rows.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE)
 
   // Bulk-provision resident logins
   const [wings, setWings] = useState([])
@@ -197,7 +203,7 @@ export default function Users() {
           <tr>{['Email / phone', 'Name', 'Role'].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((u) => (
+          {pageRows.map((u) => (
             <tr key={u.id}>
               <td style={{ ...ui.td, fontWeight: 500 }}>{u.email || u.phone || '—'}</td>
               <td style={{ ...ui.td, color: colors.sub }}>{u.full_name || '—'}</td>
@@ -211,6 +217,18 @@ export default function Users() {
         </tbody>
       </table>
       </div>
+
+      {pageCount > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+          <button type="button" className="btn btn--ghost btn--sm"
+                  disabled={p === 0} onClick={() => setPage(p - 1)}>← Prev</button>
+          <span style={{ fontSize: 13, color: colors.muted }}>
+            Page {p + 1} of {pageCount} · {rows.length} users
+          </span>
+          <button type="button" className="btn btn--ghost btn--sm"
+                  disabled={p >= pageCount - 1} onClick={() => setPage(p + 1)}>Next →</button>
+        </div>
+      )}
     </div>
   )
 }
