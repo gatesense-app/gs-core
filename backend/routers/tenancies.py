@@ -105,7 +105,7 @@ def _tenancy_resp(db, t: m.Tenancy) -> TenancyResponse:
         ended_at=t.ended_at,
         status=_status(t),
         prior_tenancy_id=str(t.prior_tenancy_id) if t.prior_tenancy_id else None,
-        tenants=[_to_resp(r) for r in tenants],
+        tenants=[_to_resp(db, r) for r in tenants],
     )
 
 

@@ -80,6 +80,17 @@ export default function Societies() {
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
+  async function togglePhonePrivacy(soc) {
+    setBusy(true); setError('')
+    try {
+      await apiFetch(`/societies/${soc.id}`, {
+        method: 'PATCH',
+        body: { hide_resident_phones: !soc.hide_resident_phones },
+      })
+      await load()
+    } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+
   async function saveAdmin(societyId) {
     setBusy(true); setError('')
     try {
@@ -156,7 +167,7 @@ export default function Societies() {
       <div className="table-wrap">
         <table style={ui.table}>
           <thead>
-            <tr>{['Name', 'Address', 'Admins', ''].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
+            <tr>{['Name', 'Address', 'Admins', 'Resident phones', ''].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {rows.map((soc) => (
@@ -171,6 +182,7 @@ export default function Societies() {
                       <input className="input" aria-label="Address" value={editForm.address}
                         onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
                     </td>
+                    <td style={ui.td} />
                     <td style={ui.td} />
                     <td style={ui.td}>
                       <div style={s.actions}>
@@ -187,6 +199,13 @@ export default function Societies() {
                       {soc.admin_count > 0
                         ? <span style={s.adminCount}>{soc.admin_count}</span>
                         : <span style={s.noAdmin}>No admin</span>}
+                    </td>
+                    <td style={ui.td}>
+                      <button className="btn btn--ghost btn--sm" disabled={busy}
+                              title="Masking hides all but the last 4 digits of resident phones from staff"
+                              onClick={() => togglePhonePrivacy(soc)}>
+                        {soc.hide_resident_phones ? 'Masked ✓' : 'Shown'}
+                      </button>
                     </td>
                     <td style={ui.td}>
                       <div style={s.actions}>

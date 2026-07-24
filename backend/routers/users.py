@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend import audit
 from backend import db_models as m
 from backend.deps import CurrentUser, get_db, require_role
-from backend.routers.common import normalize_phone, parse_uuid, resolve_society_id
+from backend.routers.common import mask_phone, normalize_phone, parse_uuid, resolve_society_id, society_hides_phone
 from backend.schemas import (
     ProvisionedRow,
     ProvisionRequest,
@@ -21,11 +22,16 @@ router = APIRouter(prefix="/users", tags=["users"])
 _admins = require_role("platform_admin", "society_admin")
 
 
-def _to_resp(u: m.User) -> UserResponse:
+def _to_resp(db, u: m.User) -> UserResponse:
+    # A resident login's identifier is a phone; mask it for staff when the
+    # society opts in (the resident already knows their own number).
+    phone = u.phone
+    if phone and society_hides_phone(db, u.society_id):
+        phone = mask_phone(phone)
     return UserResponse(
         id=str(u.id),
         email=u.email,
-        phone=u.phone,
+        phone=phone,
         role=u.role,
         full_name=u.full_name,
         society_id=str(u.society_id) if u.society_id else None,
@@ -36,7 +42,7 @@ def _to_resp(u: m.User) -> UserResponse:
 @router.get("", response_model=list[UserResponse])
 def list_users(_: CurrentUser = Depends(_admins), db=Depends(get_db)):
     rows = db.execute(select(m.User).order_by(m.User.email)).scalars().all()
-    return [_to_resp(u) for u in rows]
+    return [_to_resp(db, u) for u in rows]
 
 
 @router.post("", status_code=201, response_model=UserResponse)
@@ -55,7 +61,7 @@ def create_user(body: UserCreate, user: CurrentUser = Depends(_admins), db=Depen
         db.flush()
     except Exception:
         raise HTTPException(409, "A user with that email already exists")
-    return _to_resp(new_user)
+    return _to_resp(db, new_user)
 
 
 @router.post("/provision-residents", response_model=ProvisionResult)
@@ -97,6 +103,7 @@ def provision_residents(
         select(m.User.phone).where(m.User.phone.is_not(None))
     ).scalars().all())
 
+    hide = society_hides_phone(db, society_id)
     created: list[ProvisionedRow] = []
     skipped: list[SkippedRow] = []
     for r in residents:
@@ -114,22 +121,34 @@ def provision_residents(
                                       reason="phone already used by another login"))
             continue
 
-        db.add(m.User(
+        # The phone unique index is global (a number is one login platform-wide),
+        # but taken_phones only sees this society under RLS — a collision with
+        # another society surfaces here. A savepoint lets us skip it cleanly
+        # instead of failing the whole request.
+        new = m.User(
             society_id=society_id, email=None, phone=phone, password_hash=pw_hash,
             role="resident", full_name=r.name, resident_id=r.id,
-        ))
-        db.flush()
+        )
+        try:
+            with db.begin_nested():
+                db.add(new)
+                db.flush()
+        except IntegrityError:
+            skipped.append(SkippedRow(name=r.name, flat_number=r.flat_number,
+                                      reason="phone already used by another login"))
+            continue
         taken_phones.add(phone)
         linked.add(r.id)
         audit.record(
             db, society_id=society_id, user=user, action="resident_login_provisioned",
-            summary=f"Portal login provisioned for {r.name} ({phone})",
+            summary=f"Portal login provisioned for {r.name}",  # no number on the timeline
             entity_type=audit.RESIDENT, entity_id=r.id,
             flat_id=(f.id if (f := resolve.flat_for(db, society_id, r.flat_number)) else None),
             flat_code=r.flat_number,
         )
         created.append(ProvisionedRow(
-            resident_id=str(r.id), name=r.name, flat_number=r.flat_number, phone=phone))
+            resident_id=str(r.id), name=r.name, flat_number=r.flat_number,
+            phone=mask_phone(phone) if hide else phone))
 
     return ProvisionResult(
         created_count=len(created), skipped_count=len(skipped),

@@ -81,6 +81,7 @@ def create_society(
         created_at=society.created_at,
         admin_count=admin_count,
         flat_count=0,  # a new society has no layout yet
+        hide_resident_phones=society.hide_resident_phones,
     )
 
 
@@ -101,6 +102,7 @@ def list_societies(
             created_at=s.created_at,
             admin_count=counts.get(s.id, 0),
             flat_count=flats.get(s.id, 0),
+            hide_resident_phones=s.hide_resident_phones,
         )
         for s in rows
     ]
@@ -140,4 +142,5 @@ def update_society(
         created_at=society.created_at,
         admin_count=counts.get(society.id, 0),
         flat_count=flats.get(society.id, 0),
+        hide_resident_phones=society.hide_resident_phones,
     )

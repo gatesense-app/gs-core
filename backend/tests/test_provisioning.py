@@ -82,17 +82,17 @@ def _provision(society_id, **body):
 
 def test_provision_creates_a_phone_login_that_reaches_the_flat(society):
     _flat(society)
-    _resident(society, "A-101", "Priya Sharma", "+91 98000 00001")
+    _resident(society, "A-101", "Priya Sharma", "+91 95550 00001")
 
     r = _provision(society)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["created_count"] == 1
-    assert body["created"][0]["phone"] == "9800000001"  # bare 10 digits, no +91
+    assert body["created"][0]["phone"] == "9555000001"  # bare 10 digits, no +91
 
     # The resident can log in with just the 10-digit number (or with +91 — both
     # normalise to the same thing).
-    login = client.post("/auth/login", json={"email": "9800000001", "password": DEFAULT_PW})
+    login = client.post("/auth/login", json={"email": "9555000001", "password": DEFAULT_PW})
     assert login.status_code == 200, login.text
     assert login.json()["role"] == "resident"
 
@@ -104,7 +104,7 @@ def test_provision_creates_a_phone_login_that_reaches_the_flat(society):
 
 def test_provision_is_idempotent(society):
     _flat(society)
-    _resident(society, "A-101", "Priya Sharma", "+919800000001")
+    _resident(society, "A-101", "Priya Sharma", "+919555000001")
     assert _provision(society).json()["created_count"] == 1
     second = _provision(society).json()
     assert second["created_count"] == 0
@@ -123,8 +123,8 @@ def test_residents_without_a_phone_are_skipped(society):
 def test_duplicate_phone_is_skipped(society):
     _flat(society, "101")
     _flat(society, "102")
-    _resident(society, "A-101", "Priya Sharma", "+919800000001")
-    _resident(society, "A-102", "Rahul Verma", "+919800000001")  # same phone
+    _resident(society, "A-101", "Priya Sharma", "+919555000001")
+    _resident(society, "A-102", "Rahul Verma", "+919555000001")  # same phone
     body = _provision(society).json()
     assert body["created_count"] == 1
     assert any(s["reason"] == "phone already used by another login" for s in body["skipped"])
@@ -141,8 +141,8 @@ def test_wing_filter_narrows_provisioning(society):
                             if w["name"] == "B")["id"]),
         "flat_number": "201", "floor": 2})
     assert r.status_code == 201
-    _resident(society, "A-101", "Aoife A", "+919800000001")
-    _resident(society, "B-201", "Bala B", "+919800000002")
+    _resident(society, "A-101", "Aoife A", "+919555000001")
+    _resident(society, "B-201", "Bala B", "+919555000002")
 
     body = _provision(society, wing_id=_wing_id(society)).json()  # wing A only
     assert body["created_count"] == 1
@@ -159,9 +159,9 @@ def test_email_login_still_works_for_admins(society):
 
 def test_wrong_password_is_rejected_for_phone_login(society):
     _flat(society)
-    _resident(society, "A-101", "Priya Sharma", "+919800000001")
+    _resident(society, "A-101", "Priya Sharma", "+919555000001")
     _provision(society)
-    r = client.post("/auth/login", json={"email": "+919800000001", "password": "wrong"})
+    r = client.post("/auth/login", json={"email": "+919555000001", "password": "wrong"})
     assert r.status_code == 401
 
 

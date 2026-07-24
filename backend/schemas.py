@@ -66,6 +66,8 @@ class SocietyUpdate(BaseModel):
 
     name: Optional[str] = None
     address: Optional[str] = None
+    # Privacy toggle: mask resident mobile numbers in admin-facing responses.
+    hide_resident_phones: Optional[bool] = None
 
 
 class SocietyResponse(BaseModel):
@@ -78,6 +80,8 @@ class SocietyResponse(BaseModel):
     # Counted from actual flats, never floors * flats_per_floor (E4-S1 / Q2), so
     # the number can't lie when reality disagrees with the declared shape.
     flat_count: int = 0
+    # When true, resident phones are masked (last 4) for staff.
+    hide_resident_phones: bool = False
 
 
 # ---------------------------------------------------------------------------

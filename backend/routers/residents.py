@@ -6,7 +6,7 @@ from sqlalchemy import select
 from backend import audit
 from backend import db_models as m
 from backend.deps import CurrentUser, get_db, require_role
-from backend.routers.common import parse_uuid, resolve_society_id
+from backend.routers.common import mask_phone, parse_uuid, resolve_society_id, society_hides_phone
 from backend.schemas import ResidentCreate, ResidentResponse, ResidentUpdate
 from backend.tools import resolve
 
@@ -15,13 +15,16 @@ router = APIRouter(prefix="/residents", tags=["residents"])
 _admins = require_role("platform_admin", "society_admin")
 
 
-def _to_resp(r: m.Resident) -> ResidentResponse:
+def _to_resp(db, r: m.Resident) -> ResidentResponse:
+    # Mask the mobile number for staff when the society opts in; the resident
+    # still sees their own in full through the portal (portal.py doesn't mask).
+    phone = mask_phone(r.phone) if society_hides_phone(db, r.society_id) else r.phone
     return ResidentResponse(
         id=str(r.id),
         society_id=str(r.society_id),
         flat_number=r.flat_number,
         name=r.name,
-        phone=r.phone,
+        phone=phone,
         is_primary=r.is_primary,
         role=r.role,
         tenancy_id=str(r.tenancy_id) if r.tenancy_id else None,
@@ -55,7 +58,7 @@ def list_residents(_: CurrentUser = Depends(_admins), db=Depends(get_db)):
         .where(m.Resident.deleted_at.is_(None))
         .order_by(m.Resident.flat_number)
     ).scalars().all()
-    return [_to_resp(r) for r in rows]
+    return [_to_resp(db, r) for r in rows]
 
 
 @router.post("", status_code=201, response_model=ResidentResponse)
@@ -86,7 +89,7 @@ def create_resident(body: ResidentCreate, user: CurrentUser = Depends(_admins), 
         flat_id=_flat_id_for(db, society_id, resident.flat_number),
         flat_code=resident.flat_number,
     )
-    return _to_resp(resident)
+    return _to_resp(db, resident)
 
 
 @router.get("/{resident_id}", response_model=ResidentResponse)
@@ -94,7 +97,7 @@ def get_resident(resident_id: str, _: CurrentUser = Depends(_admins), db=Depends
     resident = db.get(m.Resident, parse_uuid(resident_id))
     if resident is None or resident.deleted_at is not None:  # hidden -> 404
         raise HTTPException(404, "Resident not found")
-    return _to_resp(resident)
+    return _to_resp(db, resident)
 
 
 @router.patch("/{resident_id}", response_model=ResidentResponse)
@@ -189,7 +192,7 @@ def update_resident(
             flat_id=_flat_id_for(db, resident.society_id, resident.flat_number),
             flat_code=resident.flat_number,
         )
-    return _to_resp(resident)
+    return _to_resp(db, resident)
 
 
 @router.delete("/{resident_id}", status_code=204)

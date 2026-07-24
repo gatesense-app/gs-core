@@ -47,6 +47,11 @@ class Society(Base):
     id = _pk()
     name = Column(String(200), nullable=False)
     address = Column(Text)
+    # Privacy: when on, resident mobile numbers are masked (last 4 only) in every
+    # admin-facing response. The resident still sees their own in full via the
+    # portal, and the gate/agents resolve by phone internally — only the read-back
+    # to staff is masked. See routers/common.mask_phone.
+    hide_resident_phones = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = _created_at()
 
 

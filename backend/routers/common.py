@@ -4,7 +4,34 @@ import uuid
 
 from fastapi import HTTPException
 
+from backend import db_models as m
 from backend.deps import CurrentUser
+
+
+def mask_phone(phone: str | None) -> str | None:
+    """
+    Hide all but the last four digits of a phone for display, e.g. "••••0000".
+
+    Used to keep resident mobile numbers out of admin-facing responses when a
+    society opts in (society_hides_phone). Returns None unchanged, and a very
+    short value fully masked.
+    """
+    if not phone:
+        return phone
+    return f"••••{phone[-4:]}" if len(phone) >= 4 else "••••"
+
+
+def society_hides_phone(db, society_id) -> bool:
+    """Whether this society masks resident phones in admin-facing responses.
+
+    Reads Society.hide_resident_phones; db.get caches within the request, so
+    calling it per row in a list is cheap.
+    """
+    if society_id is None:
+        return False
+    soc = db.get(m.Society, society_id if isinstance(society_id, uuid.UUID)
+                 else uuid.UUID(str(society_id)))
+    return bool(soc and soc.hide_resident_phones)
 
 
 def normalize_phone(raw: str | None) -> str | None:
