@@ -33,6 +33,7 @@ import os
 
 from sqlalchemy import select
 
+from backend import audit
 from backend import db_models as m
 from backend.tools import resolve
 
@@ -158,7 +159,8 @@ def validate(db, society_id, rows: list[dict]) -> dict:
     existing_flats = {
         f.code: f
         for f in db.execute(
-            select(m.Flat).where(m.Flat.society_id == society_id)
+            select(m.Flat).where(
+                m.Flat.society_id == society_id, m.Flat.deleted_at.is_(None))
         ).scalars().all()
     }
 
@@ -242,14 +244,27 @@ def validate(db, society_id, rows: list[dict]) -> dict:
     # Match rows to existing residents by the natural key (code, lower(name)).
     existing_residents = _resident_index(db, society_id)
     to_create = to_update = 0
+    file_keys = set()
     for vr in valid_rows:
         key = (vr["code"], vr["name"].lower())
+        file_keys.add(key)
         if key in existing_residents:
             to_update += 1
         else:
             to_create += 1
 
     flats_to_create = sorted(c for c in flat_floor if c not in existing_flats)
+
+    # Residents the new flats will adopt (D4): already on the code, not yet
+    # linked, and not named in the file — the ones in the file are counted above
+    # as created/updated. Predicted here so the preview can say it out loud;
+    # silently swallowing a household would be the same bug as a silent rename.
+    new_codes = set(flats_to_create)
+    to_link = sum(
+        1
+        for (code, name), r in existing_residents.items()
+        if code in new_codes and r.flat_id is None and (code, name) not in file_keys
+    )
 
     return {
         "errors": errors,
@@ -266,24 +281,32 @@ def validate(db, society_id, rows: list[dict]) -> dict:
             "total_rows": len(rows),
             "residents_to_create": to_create,
             "residents_to_update": to_update,
+            "residents_to_link": to_link,
             "flats_to_create": len(flats_to_create),
             "rejected_rows": len({e["row"] for e in errors}),
         },
     }
 
 
-def apply_plan(db, society_id, plan: dict) -> None:
+def apply_plan(db, society_id, plan: dict, user=None) -> None:
     """
     Write a validated plan in the caller's transaction (E3-S1).
 
     Assumes `validate` returned no errors — a plan with rejected rows is never
     applied. Creates missing flats, upserts residents by natural key, then
-    settles exactly one primary per touched flat.
+    settles exactly one primary per touched flat. Each change is recorded on the
+    timeline (audit) so an import reads there exactly like the same edits done by
+    hand — the path that created a flat or a resident is not something anyone
+    should be able to feel afterwards.
     """
     wings = plan["wings"]
     flats = dict(plan["existing_flats"])
 
     # 1. Flats the file introduces (D2 note 3: import is the bulk create path).
+    #    Each one adopts the free-text residents already sitting on its code,
+    #    exactly as typing the flat in by hand does (D4) — a flat coming into
+    #    existence must not orphan the people already behind that door, and which
+    #    path created it is not a distinction anyone should be able to feel.
     for code in plan["flats_to_create"]:
         wing = _wing_for(wings, code)
         flat = m.Flat(
@@ -294,18 +317,32 @@ def apply_plan(db, society_id, plan: dict) -> None:
         db.add(flat)
         db.flush()
         flats[code] = flat
+        linked = resolve.link_exact_matches(db, society_id, flat)
+        summary = f"Flat {code} added on floor {flat.floor} (imported)"
+        if linked:
+            summary += f", adopting {linked} existing resident(s)"
+        audit.record(
+            db, society_id=society_id, user=user, action="flat_created",
+            summary=summary, entity_type=audit.FLAT, entity_id=flat.id,
+            flat_id=flat.id, flat_code=code,
+            detail={"floor": flat.floor, "linked_residents": linked, "via": "import"},
+        )
 
     # 2. Residents: update the ones we already have, create the rest, and link
     #    each to its flat so the layout and the agents agree. Keep each row's
     #    resident so step 3 can promote the right one without re-matching a name
     #    we may have neutralised on the way in.
     existing = plan["existing_residents"]
+    # Imported residents are the flat's owners/household — CSV import has no
+    # tenancy concept, so role defaults to owner. Tenants come only through a
+    # tenancy (routers/tenancies.py).
     resident_by_line: dict[int, m.Resident] = {}
     for vr in plan["rows"]:
         flat = flats[vr["code"]]
         key = (vr["code"], vr["name"].lower())
         resident = existing.get(key)
-        if resident is None:
+        is_new = resident is None
+        if is_new:
             resident = m.Resident(
                 society_id=society_id, flat_number=vr["code"], name=neutralize(vr["name"]),
             )
@@ -316,26 +353,36 @@ def apply_plan(db, society_id, plan: dict) -> None:
             resident.phone = vr["phone"]
         db.flush()
         resident_by_line[vr["line"]] = resident
+        audit.record(
+            db, society_id=society_id, user=user,
+            action="resident_added" if is_new else "resident_edited",
+            summary=f"{resident.name} {'added to' if is_new else 'updated on'} "
+                    f"{vr['code']} (imported)",
+            entity_type=audit.RESIDENT, entity_id=resident.id,
+            flat_id=flat.id, flat_code=vr["code"],
+        )
 
     # The first row for each flat, in file order — Q3's tiebreak when no row is
     # marked. It has to be explicit: rows imported in one transaction share a
     # created_at, and gen_random_uuid() isn't monotonic, so ensure_primary's
-    # (created_at, id) order would pick an arbitrary row for a brand-new flat.
+    # (created_at, id) order would pick an arbitrary row.
     first_line = {}
     for vr in plan["rows"]:
         first_line.setdefault(vr["code"], vr["line"])
-    new_flats = set(plan["flats_to_create"])
 
     # 3. One primary per touched flat, deterministically (E6-S3 / Q3).
     for code in plan["flat_floor"]:
         line = plan["flat_primary_line"].get(code)
-        if line is None and code in new_flats:
-            # Brand-new flat, nobody marked: the first row wins (Q3).
-            line = first_line[code]
+        if line is None and not resolve.has_primary(db, society_id, code):
+            # Nobody is the contact for this door yet, so the first row wins (Q3).
+            # Gated on has_primary rather than "is this flat new": a new flat can
+            # arrive with an adopted resident who already holds the flag, and a
+            # file that said nothing about primaries must not depose them. Saying
+            # so is what is_primary_contact is for.
+            line = first_line.get(code)
         if line is not None:
             resolve.claim_primary(db, resident_by_line[line])
         else:
-            # An existing flat with no marked row keeps the primary it had.
             resolve.ensure_primary(db, society_id, code)
 
 
@@ -351,9 +398,16 @@ def _wing_for(wings: dict, code: str):
 
 
 def _resident_index(db, society_id) -> dict:
-    """(code, lower(name)) -> Resident, for natural-key upsert."""
+    """
+    (code, lower(name)) -> live Resident, for natural-key upsert.
+
+    Soft-deleted residents are excluded: re-importing a removed person creates a
+    fresh resident rather than resurrecting a deleted one — restore is a separate,
+    deliberate action, not a side effect of an import (there is no restore yet).
+    """
     rows = db.execute(
-        select(m.Resident).where(m.Resident.society_id == society_id)
+        select(m.Resident).where(
+            m.Resident.society_id == society_id, m.Resident.deleted_at.is_(None))
     ).scalars().all()
     return {(r.flat_number, r.name.lower()): r for r in rows}
 

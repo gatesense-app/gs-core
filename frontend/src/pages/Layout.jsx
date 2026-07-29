@@ -18,38 +18,71 @@ import { ui, colors } from '../ui'
 // now" — no realtime here on purpose. (See realtime.js; unused.)
 
 // Match residents onto flats by (society_id, code). A flat carries no resident
-// count, so we build a set of occupied keys from /residents. platform_admin's
-// /residents spans societies, hence society_id is part of the key.
+// count, so we derive both occupancy and the contact from /residents.
+// platform_admin's /residents spans societies, hence society_id is part of the key.
 function occKey(societyId, code) {
   return `${societyId}::${code}`
 }
 
+// The cell is a container, not the link itself: it holds a link *and* a remove
+// button, and a <button> nested inside an <a> is invalid and unreachable by
+// keyboard. The link fills the cell; the button sits in its corner.
 const flatCell = {
+  position: 'relative', flex: '0 0 auto', width: 124, minHeight: 56,
+  borderRadius: 10, boxSizing: 'border-box', border: '1px solid var(--c-border)',
+}
+const cellLink = {
   display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'center',
-  flex: '0 0 auto', width: 84, minHeight: 56, padding: '8px 10px',
-  borderRadius: 10, textDecoration: 'none', boxSizing: 'border-box',
-  border: '1px solid var(--c-border)',
+  height: '100%', padding: '8px 10px', borderRadius: 10,
+  textDecoration: 'none', boxSizing: 'border-box',
 }
 const flatState = {
   occupied: { background: 'var(--c-accent-bg)', borderColor: 'var(--c-accent-border)', color: 'var(--c-ok)' },
+  // Tenant-occupied flats read differently at a glance (amber). The colour is
+  // backed by the cell's title text (see below), so it isn't carried by hue alone.
+  tenant: { background: '#f59e0b1f', borderColor: '#f59e0b66', color: 'var(--c-ok)' },
   vacant: { background: 'transparent', color: 'var(--c-muted)' },
 }
+// Names are longer than "Occupied" and vary wildly; clip rather than let one
+// long name stretch a floor into a horizontal scroll. The full name is in the
+// cell's title, and the flat detail page has it in full.
+const clip = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
 
-function Flat({ flat, occupied }) {
-  const label = occupied ? 'Occupied' : 'Vacant'
+function Flat({ flat, contact, occupied, onDelete }) {
+  // The primary contact is who the gate actually calls (E6-S3), which is more
+  // use on a grid than a yes/no. Every flat with residents has exactly one —
+  // the DB enforces at most one, and ensure_primary appoints one on every write
+  // path — so "no contact" means nobody lives here. `occupied` still guards the
+  // gap: were a flat ever to hold residents with nobody flagged, it must not be
+  // labelled Vacant, which would be a lie about an occupied home.
+  const label = contact || (occupied ? 'Occupied' : 'Vacant')
+  const filled = Boolean(contact || occupied)
+  const isTenant = filled && flat.occupancy === 'tenant'
+  const state = !filled ? flatState.vacant : isTenant ? flatState.tenant : flatState.occupied
+  const title = contact
+    ? `Flat ${flat.code} — primary contact ${contact}${isTenant ? ' (tenant-occupied)' : ''}`
+    : `Flat ${flat.code} — ${label}`
   return (
-    <Link
-      to={`/flat/${flat.id}`}
-      style={{ ...flatCell, ...(occupied ? flatState.occupied : flatState.vacant) }}
-      title={`Flat ${flat.code} — ${label}`}
-    >
-      <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)' }}>{flat.code}</span>
-      {/* State is never colour-alone: a shape marker + a text label carry it too. */}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
-        <span aria-hidden="true">{occupied ? '●' : '○'}</span>
-        {label}
-      </span>
-    </Link>
+    <div style={{ ...flatCell, ...state }}>
+      <Link to={`/flat/${flat.id}`} style={cellLink} title={title}>
+        <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: 'var(--c-text)', paddingRight: 14 }}>{flat.code}</span>
+        {/* State is never colour-alone: a shape marker + a text label carry it too. */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, minWidth: 0 }}>
+          <span aria-hidden="true" style={{ flex: '0 0 auto' }}>{filled ? '●' : '○'}</span>
+          <span style={clip}>{label}</span>
+        </span>
+      </Link>
+      {/* Asks rather than deletes: the confirm names the flat outside the cell,
+          where there is room to say what is about to happen. */}
+      <button
+        type="button"
+        className="chip-x"
+        aria-label={`Delete flat ${flat.code}`}
+        title={`Delete flat ${flat.code}`}
+        style={{ position: 'absolute', top: 4, right: 4 }}
+        onClick={() => onDelete(flat)}
+      >×</button>
+    </div>
   )
 }
 
@@ -66,17 +99,27 @@ export default function Layout() {
   const [wingId, setWingId] = useState('')
   const [flats, setFlats] = useState([])
   const [occupied, setOccupied] = useState(() => new Set())
+  const [contacts, setContacts] = useState(() => new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   // Management (E4-S1/S2)
   const [wingForm, setWingForm] = useState(emptyWing)
+  const [editForm, setEditForm] = useState(emptyWing)
   const [flatForm, setFlatForm] = useState(emptyFlat)
   const [showAddWing, setShowAddWing] = useState(false)
+  const [showEditWing, setShowEditWing] = useState(false)
   const [showAddFlat, setShowAddFlat] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState([])   // Q2 warnings / adoption feedback
   const [confirmWing, setConfirmWing] = useState(false)
+  const [confirmFlat, setConfirmFlat] = useState(null)
+  const [confirmLink, setConfirmLink] = useState(null)  // prior deleted flat found on add
+
+  // Grid search + filters
+  const [search, setSearch] = useState('')
+  const [fOccupancy, setFOccupancy] = useState('all')  // all | owner | tenant
+  const [fStatus, setFStatus] = useState('all')        // all | occupied | vacant
 
   // society_admin's society comes from the JWT; platform_admin must name one.
   const sq = isPlatform ? societyId : ''
@@ -103,6 +146,7 @@ export default function Layout() {
     if (!wid) {
       setFlats([])
       setOccupied(new Set())
+      setContacts(new Map())
       return
     }
     setLoading(true)
@@ -113,6 +157,10 @@ export default function Layout() {
       ])
       setFlats(flatRows)
       setOccupied(new Set(residents.map((r) => occKey(r.society_id, r.flat_number))))
+      setContacts(new Map(
+        residents.filter((r) => r.is_primary)
+          .map((r) => [occKey(r.society_id, r.flat_number), r.name]),
+      ))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -131,6 +179,9 @@ export default function Layout() {
 
   useEffect(() => {
     setNotice([])
+    setSearch('')
+    setFOccupancy('all')
+    setFStatus('all')
     loadFlats(wingId)
   }, [wingId, loadFlats])
 
@@ -160,31 +211,110 @@ export default function Layout() {
     }
   }
 
-  async function addFlat(e) {
+  function startEditWing() {
+    setEditForm({
+      name: wing?.name ?? '',
+      floors: String(wing?.floors ?? ''),
+      flats_per_floor: String(wing?.flats_per_floor ?? ''),
+    })
+    setShowEditWing(true)
+    setShowAddFlat(false)
+    setNotice([])
+  }
+
+  async function saveWing(e) {
     e.preventDefault()
     setBusy(true)
     setError('')
     setNotice([])
     try {
-      const created = await apiFetch('/flats', {
-        method: 'POST',
+      const updated = await apiFetch(`/wings/${wingId}`, {
+        method: 'PATCH',
         body: {
-          wing_id: wingId,
-          flat_number: flatForm.flat_number.trim(),
-          floor: Number(flatForm.floor),
+          name: editForm.name.trim(),
+          floors: Number(editForm.floors),
+          flats_per_floor: Number(editForm.flats_per_floor),
         },
       })
+      setShowEditWing(false)
+      // E4-S3: what the edit deliberately left alone — kept codes after a
+      // rename, flats now outside a reduced shape. Never a rejection.
+      setNotice(updated.warnings || [])
+      await loadWings()
+      await loadFlats(wingId)   // the grid redraws; the flats don't move
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function addFlat(e) {
+    e.preventDefault()
+    const flat_number = flatForm.flat_number.trim()
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      // A flat with this code may have been deleted before. If so, ask whether to
+      // adopt its history rather than silently starting a fresh, blank flat.
+      const prior = await apiFetch(
+        `/flats/prior-deleted?wing_id=${wingId}&flat_number=${encodeURIComponent(flat_number)}`,
+      )
+      if (prior.exists) {
+        setConfirmLink({ prior, floor: Number(flatForm.floor), flat_number })
+        setBusy(false)
+        return
+      }
+      await postFlat(flat_number, Number(flatForm.floor), false)
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  // The actual create, shared by the plain path and the "link its history" choice.
+  async function postFlat(flat_number, floor, link_prior) {
+    setBusy(true)
+    setError('')
+    try {
+      const created = await apiFetch('/flats', {
+        method: 'POST',
+        body: { wing_id: wingId, flat_number, floor, link_prior },
+      })
       setFlatForm({ ...emptyFlat, floor: flatForm.floor })  // keep the floor for the next one
+      setConfirmLink(null)
       // Q2: the declared shape is only a hint, so the server saves and warns.
       // Surfacing that is the whole point — a silent warning is no warning.
       const msgs = [...(created.warnings || [])]
       if (created.linked_residents > 0) {
         msgs.push(`Linked ${created.linked_residents} existing resident(s) already on ${created.code}.`)
       }
+      if (link_prior) {
+        msgs.push(`The previously deleted ${created.code}'s history now appears on this flat's page.`)
+      }
       setNotice(msgs)
       await loadFlats(wingId)
     } catch (err) {
       setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteFlat() {
+    setBusy(true)
+    setError('')
+    setNotice([])
+    try {
+      await apiFetch(`/flats/${confirmFlat.id}`, { method: 'DELETE' })
+      setConfirmFlat(null)
+      await loadFlats(wingId)
+    } catch (err) {
+      // Soft delete rarely fails, but surface any reason verbatim rather than
+      // swallow it.
+      setError(err.message)
+      setConfirmFlat(null)
     } finally {
       setBusy(false)
     }
@@ -206,10 +336,31 @@ export default function Layout() {
     }
   }
 
+  // Search (flat number/code or primary contact name) + occupancy/status filters.
+  const filteredFlats = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return flats.filter((f) => {
+      const key = occKey(f.society_id, f.code)
+      const isOccupied = occupied.has(key)
+      if (fStatus === 'occupied' && !isOccupied) return false
+      if (fStatus === 'vacant' && isOccupied) return false
+      if (fOccupancy !== 'all' && (f.occupancy || 'owner') !== fOccupancy) return false
+      if (q) {
+        const contact = (contacts.get(key) || '').toLowerCase()
+        if (!f.code.toLowerCase().includes(q) &&
+            !String(f.flat_number).toLowerCase().includes(q) &&
+            !contact.includes(q)) return false
+      }
+      return true
+    })
+  }, [flats, occupied, contacts, search, fOccupancy, fStatus])
+
+  const filtersActive = search.trim() !== '' || fOccupancy !== 'all' || fStatus !== 'all'
+
   // Group flats into rows, one floor per row, highest floor at the top.
   const floors = useMemo(() => {
     const byFloor = new Map()
-    for (const f of flats) {
+    for (const f of filteredFlats) {
       if (!byFloor.has(f.floor)) byFloor.set(f.floor, [])
       byFloor.get(f.floor).push(f)
     }
@@ -217,7 +368,7 @@ export default function Layout() {
       floor,
       flats: byFloor.get(floor).sort((a, b) => (a.flat_number > b.flat_number ? 1 : -1)),
     }))
-  }, [flats])
+  }, [filteredFlats])
 
   const occCount = useMemo(
     () => flats.filter((f) => occupied.has(occKey(f.society_id, f.code))).length,
@@ -324,8 +475,12 @@ export default function Layout() {
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setShowAddFlat((v) => !v)}>
               {showAddFlat ? 'Cancel' : 'Add flat'}
             </button>
-            {/* No PATCH /wings yet (E4-S3), so deleting is the only way to undo a
-                typo'd name. The server refuses once the wing has flats. */}
+            <button type="button" className="btn btn--ghost btn--sm"
+                    onClick={() => (showEditWing ? setShowEditWing(false) : startEditWing())}>
+              {showEditWing ? 'Cancel' : 'Edit building'}
+            </button>
+            {/* Deleting stays available for a wing declared entirely by mistake;
+                the server refuses once it has flats. */}
             {flats.length === 0 && !confirmWing && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmWing(true)}>
                 Delete building
@@ -339,6 +494,38 @@ export default function Layout() {
               </span>
             )}
           </div>
+
+          {showEditWing && (
+            <form style={ui.card} onSubmit={saveWing}>
+              <div style={{ ...ui.label, fontSize: 14, color: colors.text, marginBottom: 4 }}>
+                Edit {wing?.name}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginBottom: 14 }}>
+                Renaming is safe: existing flats keep their codes, so a visitor logged at{' '}
+                <code>{wing?.name}-101</code> still means that flat. Only new flats use the new
+                name. Changing floors or flats-per-floor just redraws the grid — reducing it
+                never deletes a flat.
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div style={{ width: 160 }}>
+                  <label style={ui.label}>Name</label>
+                  <input className="input" value={editForm.name}
+                         onChange={set(setEditForm, 'name')} required />
+                </div>
+                <div style={{ width: 110 }}>
+                  <label style={ui.label}>Floors</label>
+                  <input className="input" type="number" min="1" value={editForm.floors}
+                         onChange={set(setEditForm, 'floors')} required />
+                </div>
+                <div style={{ width: 130 }}>
+                  <label style={ui.label}>Flats / floor</label>
+                  <input className="input" type="number" min="1" value={editForm.flats_per_floor}
+                         onChange={set(setEditForm, 'flats_per_floor')} required />
+                </div>
+                <button className="btn btn--primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+              </div>
+            </form>
+          )}
 
           {showAddFlat && (
             <form style={ui.card} onSubmit={addFlat}>
@@ -366,6 +553,51 @@ export default function Layout() {
             </form>
           )}
 
+          {confirmFlat && (
+            <div style={{ ...ui.card, padding: 14, display: 'flex', gap: 10,
+                          alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14, color: colors.text }}>
+                Delete flat <code>{confirmFlat.code}</code>?
+              </span>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                Its residents go with it. Nothing is lost — the flat and its history
+                stay on record and can be viewed from the flat page.
+              </span>
+              <button type="button" className="btn btn--sm" disabled={busy} onClick={deleteFlat}>
+                {busy ? 'Deleting…' : 'Yes, delete'}
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => setConfirmFlat(null)}>Cancel</button>
+            </div>
+          )}
+
+          {confirmLink && (
+            <div style={{ ...ui.card, padding: 14, display: 'flex', gap: 10,
+                          alignItems: 'center', flexWrap: 'wrap',
+                          borderColor: 'var(--c-accent-border)' }}>
+              <span style={{ fontSize: 14, color: colors.text }}>
+                A flat <code>{confirmLink.prior.code}</code> was deleted here before
+                {confirmLink.prior.resident_count > 0 &&
+                  ` (with ${confirmLink.prior.resident_count} resident(s))`}.
+              </span>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                Link its history to this new flat, so its past residents and events
+                show on the flat's timeline? The new flat is still new — nothing is
+                un-deleted.
+              </span>
+              <button type="button" className="btn btn--sm" disabled={busy}
+                      onClick={() => postFlat(confirmLink.flat_number, confirmLink.floor, true)}>
+                {busy ? 'Creating…' : 'Link history & create'}
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy}
+                      onClick={() => postFlat(confirmLink.flat_number, confirmLink.floor, false)}>
+                Create without history
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy}
+                      onClick={() => setConfirmLink(null)}>Cancel</button>
+            </div>
+          )}
+
           {notice.length > 0 && (
             <div style={{ ...ui.card, padding: 14, borderColor: 'var(--c-accent-border)' }}>
               {notice.map((n, i) => (
@@ -377,6 +609,47 @@ export default function Layout() {
       )}
 
       {wingId && !loading && flats.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+          <div style={{ flex: '1 1 220px', minWidth: 180 }}>
+            <label style={ui.label}>Search</label>
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)}
+                   placeholder="Flat number or contact name" />
+          </div>
+          <div style={{ width: 150 }}>
+            <label style={ui.label}>Occupancy</label>
+            <select className="input" value={fOccupancy} onChange={(e) => setFOccupancy(e.target.value)}>
+              <option value="all">All</option>
+              <option value="owner">Owner-occupied</option>
+              <option value="tenant">Tenant-occupied</option>
+            </select>
+          </div>
+          <div style={{ width: 150 }}>
+            <label style={ui.label}>Status</label>
+            <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="all">All</option>
+              <option value="occupied">Occupied</option>
+              <option value="vacant">Vacant</option>
+            </select>
+          </div>
+          {filtersActive && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 2 }}>
+              <span style={{ fontSize: 13, color: colors.muted }}>
+                {filteredFlats.length} of {flats.length}
+              </span>
+              <button type="button" className="btn btn--ghost btn--sm"
+                      onClick={() => { setSearch(''); setFOccupancy('all'); setFStatus('all') }}>
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {wingId && !loading && flats.length > 0 && filteredFlats.length === 0 && (
+        <div style={ui.sub}>No flats match these filters.</div>
+      )}
+
+      {wingId && !loading && filteredFlats.length > 0 && (
         /* Wide floors scroll inside their own container so the page body never
            scrolls sideways at 375px (mirrors the .table-wrap pattern). */
         <div className="table-wrap">
@@ -393,7 +666,13 @@ export default function Layout() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {row.map((f) => (
-                    <Flat key={f.id} flat={f} occupied={occupied.has(occKey(f.society_id, f.code))} />
+                    <Flat
+                      key={f.id}
+                      flat={f}
+                      contact={contacts.get(occKey(f.society_id, f.code))}
+                      occupied={occupied.has(occKey(f.society_id, f.code))}
+                      onDelete={(target) => { setError(''); setConfirmFlat(target) }}
+                    />
                   ))}
                 </div>
               </div>

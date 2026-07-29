@@ -60,6 +60,7 @@ function RulesEditor({ initial, onSave, onCancel, busy }) {
 }
 
 const emptyForm = { flat_number: '', name: '', phone: '', society_id: '' }
+const PAGE_SIZE = 25
 
 export default function Residents() {
   const { user } = useAuth()
@@ -70,6 +71,12 @@ export default function Residents() {
   const [editing, setEditing] = useState(null) // resident id
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [page, setPage] = useState(0)
+
+  // Clamp in case the list shrank (a delete) below the current page.
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const p = Math.min(page, pageCount - 1)
+  const pageRows = rows.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE)
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
 
@@ -156,7 +163,7 @@ export default function Residents() {
           <tr>{['Flat', 'Name', 'Phone', 'Standing rules', ''].map((h) => <th key={h} style={ui.th}>{h}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {pageRows.map((r) => (
             <tr key={r.id}>
               <td style={{ ...ui.td, fontFamily: 'monospace', color: colors.sub }}>{r.flat_number}</td>
               <td style={{ ...ui.td, fontWeight: 500 }}>{r.name}</td>
@@ -185,6 +192,18 @@ export default function Residents() {
         </tbody>
       </table>
       </div>
+
+      {pageCount > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+          <button type="button" className="btn btn--ghost btn--sm"
+                  disabled={p === 0} onClick={() => setPage(p - 1)}>← Prev</button>
+          <span style={{ fontSize: 13, color: colors.muted }}>
+            Page {p + 1} of {pageCount} · {rows.length} residents
+          </span>
+          <button type="button" className="btn btn--ghost btn--sm"
+                  disabled={p >= pageCount - 1} onClick={() => setPage(p + 1)}>Next →</button>
+        </div>
+      )}
     </div>
   )
 }

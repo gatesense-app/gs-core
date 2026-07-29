@@ -26,7 +26,7 @@ export default function Login() {
       const authed = await login(email.trim(), password)
       nav(ROLE_HOME[authed.role] || '/', { replace: true })
     } catch (err) {
-      setError(err.status === 401 ? 'Invalid email or password' : err.message)
+      setError(err.status === 401 ? 'Invalid credentials' : err.message)
     } finally {
       setLoading(false)
     }
@@ -39,18 +39,18 @@ export default function Login() {
       </h1>
       <div style={ui.sub}>Society visitor management</div>
       <form onSubmit={submit}>
-        <label style={ui.label} htmlFor="login-email">Email</label>
+        <label style={ui.label} htmlFor="login-email">Email or phone</label>
         <input
           id="login-email"
           className="input"
           style={ui.fieldGap}
-          type="email"
+          type="text"
           name="email"
-          autoComplete="email"
+          autoComplete="username"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          placeholder="admin@green.gatesense.in"
+          placeholder="admin@green.gatesense.in or +9198…"
           autoFocus
         />
         <label style={ui.label} htmlFor="login-password">Password</label>

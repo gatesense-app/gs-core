@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -46,6 +47,11 @@ class Society(Base):
     id = _pk()
     name = Column(String(200), nullable=False)
     address = Column(Text)
+    # Privacy: when on, resident mobile numbers are masked (last 4 only) in every
+    # admin-facing response. The resident still sees their own in full via the
+    # portal, and the gate/agents resolve by phone internally — only the read-back
+    # to staff is masked. See routers/common.mask_phone.
+    hide_resident_phones = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = _created_at()
 
 
@@ -88,7 +94,15 @@ class Flat(Base):
 
     __tablename__ = "flats"
     __table_args__ = (
-        UniqueConstraint("society_id", "code", name="uq_flats_society_code"),
+        # Partial: a soft-deleted flat keeps its row (for history) but frees its
+        # code, so the same A-101 can be created again later. Without the
+        # deleted_at filter the deleted row would forever block re-use.
+        Index(
+            "uq_flats_society_code",
+            "society_id", "code",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id = _pk()
@@ -97,6 +111,18 @@ class Flat(Base):
     flat_number = Column(String(32), nullable=False)
     floor = Column(Integer, nullable=False)
     code = Column(String(64), nullable=False)
+    # Soft delete: deleting a flat sets this rather than removing the row, so its
+    # history (and its residents') is never lost. Every user-facing read filters
+    # deleted_at IS NULL; resolve.py does too, so the gate never reaches a
+    # deleted flat. See backend/audit.py for the trail.
+    deleted_at = Column(DateTime(timezone=True))
+    # When a flat is re-created with the same code as a soft-deleted one, the admin
+    # may choose to link the new flat to that prior deleted flat, so its history
+    # (and its former, now-deleted residents) surfaces on the new flat's timeline.
+    # Self-referential and nullable; a fresh (unlinked) flat leaves it NULL. The
+    # link is a memory-only pointer — the deleted rows stay deleted (the gate never
+    # sees them); only the timeline walks the chain. See routers/layout.py.
+    prior_flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="SET NULL"))
     # E6-S3: rules belong to the door, not to whoever happens to live behind it —
     # two residents must not hold contradictory rules for one flat.
     #
@@ -107,6 +133,12 @@ class Flat(Base):
     # delivered by a migration.
     standing_rules = Column(JSONB)
     delivery_preferences = Column(JSONB)
+    # Who lives behind the door: the owner, or a tenant. Informational for the
+    # grid's colour, but it also decides *who the gate reaches* — a tenant-occupied
+    # flat contacts a tenant, an owner-occupied one contacts the owner (the primary
+    # slot is re-elected from the matching role pool). Never NULL: an unset value
+    # would make "who does the guard call" ambiguous.
+    occupancy = Column(String(16), nullable=False, server_default=text("'owner'"))
     created_at = _created_at()
 
 
@@ -118,15 +150,16 @@ class Resident(Base):
 
     __tablename__ = "residents"
     __table_args__ = (
-        # At most one primary per flat, enforced by Postgres rather than by
-        # hope. Keyed on flat_number (not flat_id) because it must hold in both
-        # worlds: today nearly every resident has flat_id NULL, and the agents
-        # resolve on this string until the layout is reconciled.
+        # At most one *live* primary per flat, enforced by Postgres rather than
+        # by hope. Keyed on flat_number (not flat_id) because it must hold in
+        # both worlds: today nearly every resident has flat_id NULL, and the
+        # agents resolve on this string until the layout is reconciled. The
+        # deleted_at clause lets a soft-deleted primary step aside for a live one.
         Index(
             "uq_residents_primary_per_flat",
             "society_id", "flat_number",
             unique=True,
-            postgresql_where=text("is_primary"),
+            postgresql_where=text("is_primary AND deleted_at IS NULL"),
         ),
     )
 
@@ -141,21 +174,156 @@ class Resident(Base):
     # E6-S3 / Q3: the flat's contact, defaulting to the first resident added.
     # Never rely on "whichever row the database returned first".
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
+    # Owner of the flat, or a tenant living in it. The first resident on a flat is
+    # its owner; everyone added after is a tenant (overridable). This is a stable
+    # label — distinct from is_primary, which is "who the gate reaches". The flat's
+    # occupancy decides which role pool is_primary is drawn from, so an owner keeps
+    # the 'owner' label even while a tenant is the one being contacted.
+    role = Column(String(16), nullable=False, server_default=text("'owner'"))
+    # A tenant belongs to a tenancy agreement (start/end dates, renewable). NULL
+    # for owners and for free-text residents. When a tenancy ends the tenant rows
+    # are soft-deleted, so the gate stops reaching them, but the link stays for
+    # history. See the Tenancy model and routers/tenancies.py.
+    tenancy_id = Column(_UUID, ForeignKey("tenancies.id", ondelete="SET NULL"))
     # e.g. [{"type": "always_allow", "match": "Swiggy"}, {"type": "never_allow", "after": "21:00"}]
     # A flat's own rules win over these when set (see tools/resolve.py).
     standing_rules = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     # e.g. {"auto_log_daytime": true, "notify_after_hours": true}
     delivery_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # Soft delete: removing a resident sets this, keeping the row for history.
+    # resolve.py filters it out, so a removed resident is invisible to the gate.
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
+class Tenancy(Base):
+    """
+    A tenancy agreement over a flat: the period a set of tenants occupies it.
+
+    Tenants themselves are Residents (role='tenant') pointing back here, so the
+    gate resolves them through the same primary-contact machinery as everyone
+    else. A tenancy is *active* while `ended_at` is NULL; ending it (early
+    termination, or supersession by a renewal) sets `ended_at` and soft-deletes
+    its tenants. Renewal clones a tenancy into a fresh one linked by
+    `prior_tenancy_id`. Dates are optional (month-to-month is real). See
+    routers/tenancies.py.
+    """
+
+    __tablename__ = "tenancies"
+    __table_args__ = (
+        # At most one *active* tenancy per flat: the gate must never have two
+        # competing tenant contacts. Ended/deleted rows are kept for history and
+        # excluded from the constraint, so a flat can be re-let after one ends.
+        Index(
+            "uq_active_tenancy_per_flat",
+            "society_id", "flat_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL AND deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    # Snapshot of the flat's code, like residents/events — the gate resolves on it.
+    flat_code = Column(String(64), nullable=False)
+    # Agreement dates; both optional (unknown at entry, or month-to-month).
+    start_date = Column(Date)
+    end_date = Column(Date)
+    # Set when the tenancy stops being active — early termination or when a
+    # renewal supersedes it. NULL means active.
+    ended_at = Column(DateTime(timezone=True))
+    # Renewal chain: a renewed tenancy points at the one it replaced.
+    prior_tenancy_id = Column(_UUID, ForeignKey("tenancies.id", ondelete="SET NULL"))
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
+class Vehicle(Base):
+    """
+    A vehicle registered against a flat (D1). Kept minimal for now: the RC-book
+    registration number and the primary owner's name (which may differ from any
+    resident — the RC owner is the source of truth). Soft-deleted like everyone
+    else, so a flat's vehicle history is never lost.
+    """
+
+    __tablename__ = "vehicles"
+    __table_args__ = (
+        # A registration number is unique to one live vehicle in a society; a
+        # soft-deleted one frees the number for re-entry (a typo, or a re-sale).
+        Index(
+            "uq_vehicle_reg_per_society",
+            "society_id", "registration_number",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    # Snapshot of the flat's code, like residents/tenancies.
+    flat_code = Column(String(64), nullable=False)
+    registration_number = Column(String(20), nullable=False)
+    # 'two_wheeler' or 'four_wheeler'.
+    vehicle_type = Column(String(16), nullable=False)
+    # The primary owner as per the RC book — free text, not a resident link.
+    owner_name = Column(String(200), nullable=False)
+    # Optional: the parking number this vehicle is assigned to (one of the flat's
+    # slots). Nulled if that slot is released. SET NULL only fires on a hard
+    # delete; the release path clears it explicitly since slots are soft-deleted.
+    parking_slot_id = Column(_UUID, ForeignKey("parking_slots.id", ondelete="SET NULL"))
+    deleted_at = Column(DateTime(timezone=True))
+    created_at = _created_at()
+
+
+class ParkingSlot(Base):
+    """
+    A parking number the society allotted to a flat. A flat may hold several, so
+    this is a per-flat list rather than a column. Independent of vehicles for now.
+    """
+
+    __tablename__ = "parking_slots"
+    __table_args__ = (
+        # A physical parking number is allotted to at most one live flat.
+        Index(
+            "uq_parking_number_per_society",
+            "society_id", "parking_number",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    flat_id = Column(_UUID, ForeignKey("flats.id", ondelete="CASCADE"), nullable=False)
+    flat_code = Column(String(64), nullable=False)
+    parking_number = Column(String(32), nullable=False)
+    deleted_at = Column(DateTime(timezone=True))
     created_at = _created_at()
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Resident logins provisioned from imported residents sign in by phone,
+        # not email. At most one account per phone; NULLs (admins/guards) are free.
+        Index(
+            "uq_users_phone",
+            "phone",
+            unique=True,
+            postgresql_where=text("phone IS NOT NULL"),
+        ),
+    )
 
     id = _pk()
     # NULL for platform_admin (belongs to no society)
     society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"))
-    email = Column(String(255), nullable=False, unique=True)
+    # Nullable: a phone-only resident login has no email. Still unique — Postgres
+    # allows many NULLs in a UNIQUE column, so admins/guards keep the guarantee.
+    email = Column(String(255), unique=True)
+    # Alternate login identifier for residents (see routers/auth.login).
+    phone = Column(String(32))
     password_hash = Column(String(255), nullable=False)
     role = Column(String(32), nullable=False)  # platform_admin|society_admin|guard|resident
     full_name = Column(String(200))
@@ -240,12 +408,49 @@ class NotificationDeliveryLog(Base):
     created_at = _created_at()
 
 
+class LayoutEvent(Base):
+    """
+    An append-only record of a change to a flat or its residents (the timeline).
+
+    Immutable by convention: rows are inserted, never updated or deleted, so the
+    history stays trustworthy. Actor and flat code are *snapshotted* onto the row
+    rather than joined at read time — the admin who acted may later be removed,
+    and a flat's code can change, but "who did what, and to which flat, when"
+    must still read correctly years later.
+
+    `flat_id` / `entity_id` carry no foreign keys on purpose: an event outlives
+    what it describes, and a FK would either block a future hard cleanup or drag
+    the event down with a CASCADE. The rows are soft-deleted anyway, so the
+    references stay resolvable in practice.
+    """
+
+    __tablename__ = "layout_events"
+
+    id = _pk()
+    society_id = Column(_UUID, ForeignKey("societies.id", ondelete="CASCADE"), nullable=False)
+    # The flat this event belongs to on its timeline (may be a resident action).
+    flat_id = Column(_UUID)
+    flat_code = Column(String(64))  # snapshot, so the timeline reads after a rename
+    entity_type = Column(String(16), nullable=False)  # flat | resident
+    entity_id = Column(_UUID, nullable=False)
+    action = Column(String(40), nullable=False)  # flat_created | resident_deleted | ...
+    summary = Column(Text, nullable=False)       # human-readable, built server-side
+    detail = Column(JSONB)                        # structured before/after, optional
+    actor_user_id = Column(_UUID)                 # who did it (no FK: see docstring)
+    actor_email = Column(String(255))             # snapshot of the actor's email
+    created_at = _created_at()
+
+
 # Tables that get RLS. `societies` filters on its own `id`; the rest on society_id.
 TENANT_TABLES = [
     "societies",
     "wings",
     "flats",
     "residents",
+    "tenancies",
+    "vehicles",
+    "parking_slots",
+    "layout_events",
     "users",
     "visitors",
     "visitor_sessions",
